@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://helixos.dev/schemas/molecular/sequence.schema.json",
+  "title": "Sequence",
+  "type": "object",
+  "required": ["id", "organization_id", "name", "molecule_type", "topology", "length", "created_at", "updated_at"],
+  "properties": {
+    "id": { "type": "string" },
+    "organization_id": { "type": "string" },
+    "name": { "type": "string" },
+    "molecule_type": { "type": "string", "enum": ["dna", "rna", "protein"] },
+    "topology": { "type": "string", "enum": ["linear", "circular"] },
+    "length": { "type": "integer", "minimum": 0 },
+    "features": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "start", "end", "kind"],
+        "properties": {
+          "name": { "type": "string" },
+          "start": { "type": "integer", "minimum": 0 },
+          "end": { "type": "integer", "minimum": 0 },
+          "kind": { "type": "string" }
+        }
+      }
+    },
+    "created_at": { "type": "string", "format": "date-time" },
+    "updated_at": { "type": "string", "format": "date-time" }
+  }
+}

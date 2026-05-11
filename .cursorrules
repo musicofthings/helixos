@@ -1,0 +1,10 @@
+You are working on HelixOS, an AI-native molecular biology lab platform.
+
+Rules:
+- Preserve strict typing across Python, TypeScript, and JSON Schema.
+- Keep domain modules isolated.
+- Update tests with every change.
+- Update docs and API contracts when behavior changes.
+- Use explicit audit events for regulated actions.
+- Do not introduce hidden background side effects.
+- Prefer small, composable services over broad utilities.

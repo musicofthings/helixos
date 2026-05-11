@@ -1,0 +1,21 @@
+{
+  "version": "0.1.0",
+  "connectors": [
+    {
+      "id": "biopython-local",
+      "name": "BioPython Local",
+      "description": "Local sequence parsing and molecular biology utilities.",
+      "scopes": ["sequence:read", "sequence:analyze"],
+      "transport": "stdio",
+      "enabled_by_default": false
+    },
+    {
+      "id": "pubmed",
+      "name": "PubMed",
+      "description": "Literature search connector for biomedical references.",
+      "scopes": ["literature:search"],
+      "transport": "http",
+      "enabled_by_default": false
+    }
+  ]
+}

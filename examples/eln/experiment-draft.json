@@ -1,0 +1,15 @@
+{
+  "id": "exp_demo_gibson",
+  "organization_id": "org_demo",
+  "project_id": "proj_cloning",
+  "title": "Gibson assembly of reporter plasmid",
+  "status": "draft",
+  "blocks": [
+    {
+      "type": "text",
+      "content": "Plan Gibson assembly using vector backbone and fluorescent reporter insert."
+    }
+  ],
+  "created_at": "2026-05-10T00:00:00Z",
+  "updated_at": "2026-05-10T00:00:00Z"
+}

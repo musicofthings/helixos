@@ -1,0 +1,17 @@
+.DS_Store
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+
+node_modules/
+.next/
+out/
+dist/
+
+.env
+.env.*
+!.env.example
+
+postgres_data/
+minio_data/

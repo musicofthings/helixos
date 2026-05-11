@@ -1,0 +1,1 @@
+"""HelixOS module registry."""
