@@ -2,6 +2,8 @@
 
 HelixOS exposes versioned REST APIs under `/api/v1`.
 
+**Context:** [docs/README.md](docs/README.md) · [SYSTEM_ARCHITECTURE.md](SYSTEM_ARCHITECTURE.md) · [docs/modules/](docs/modules/) (per-domain behavior and audit notes)
+
 ## Standards
 
 - JSON request and response bodies.
@@ -31,8 +33,14 @@ HelixOS exposes versioned REST APIs under `/api/v1`.
 | `GET` | `/api/v1/organizations` | List organizations visible to caller |
 | `POST` | `/api/v1/experiments` | Create ELN experiment draft |
 | `GET` | `/api/v1/experiments` | List experiment drafts visible to caller |
+| `PATCH` | `/api/v1/experiments/{experiment_id}` | Update experiment lifecycle status |
 | `GET` | `/api/v1/sequences/{sequence_id}` | Fetch sequence metadata |
 | `GET` | `/api/v1/mcp/connectors` | List MCP connectors |
+| `POST` | `/api/v1/ai/sessions` | Create agent session |
+| `POST` | `/api/v1/ai/runs` | Start agent run (SSE stream) |
+| `POST` | `/api/v1/mcp/jobs` | Dispatch connector tool via desktop MCP bridge |
+| `GET` | `/api/v1/audit/events` | List audit events visible to caller |
+| `GET` | `/api/v1/audit/verify` | Verify organization audit hash chain |
 
 ## Authentication
 
@@ -73,6 +81,16 @@ Production deployments should replace local token resolution with signed JWT val
 }
 ```
 
+## Example Experiment Status Update
+
+```json
+{
+  "status": "in_review"
+}
+```
+
+Allowed transitions: `draft` → `in_review` → `signed`.
+
 ## Example Sequence Response
 
 ```json
@@ -94,4 +112,39 @@ Production deployments should replace local token resolution with signed JWT val
   "created_at": "2026-05-10T00:00:00Z",
   "updated_at": "2026-05-10T00:00:00Z"
 }
+```
+
+## Example Agent Session Create
+
+```json
+{
+  "organization_id": "org_demo"
+}
+```
+
+## Example Agent Run Request
+
+```json
+{
+  "session_id": "sess_abc123",
+  "message": "Summarize open experiments and suggest next QC steps.",
+  "context": {
+    "experiment_id": "exp_demo",
+    "experiment_title": "Gibson assembly",
+    "sequence_length": 96
+  }
+}
+```
+
+Agent runs respond with `text/event-stream` frames:
+
+```txt
+event: tool_call
+data: {"tool": "list_experiments", "status": "completed", "count": 1}
+
+event: token
+data: {"content": "Suggested ", "run_id": "run_abc123"}
+
+event: done
+data: {"run_id": "run_abc123", "status": "completed"}
 ```

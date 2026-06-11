@@ -1,0 +1,29 @@
+{
+  "name": "@helixos/desktop",
+  "version": "0.1.0",
+  "private": true,
+  "description": "HelixOS desktop shell with embedded API sidecar",
+  "main": "out/main/index.cjs",
+  "dependencies": {
+    "electron-updater": "^6.3.9"
+  },
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "preview": "electron-vite preview",
+    "typecheck": "tsc --noEmit -p tsconfig.node.json",
+    "dev:stack": "concurrently -k -n web,desktop -c cyan,magenta \"npm run dev --prefix ../web -- -p 3000\" \"wait-on http-get://127.0.0.1:3000 && npm run dev\"",
+    "prepare:resources": "node scripts/prepare-resources.mjs",
+    "pack": "npm run build && npm run prepare:resources && npx electron-builder --dir --config electron-builder.json",
+    "dist": "npm run build && npm run prepare:resources && npx electron-builder --config electron-builder.json"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "concurrently": "^9.1.0",
+    "electron": "^33.2.1",
+    "electron-builder": "^25.1.8",
+    "electron-vite": "^2.3.0",
+    "typescript": "^5.7.0",
+    "wait-on": "^8.0.1"
+  }
+}

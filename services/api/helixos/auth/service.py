@@ -21,12 +21,12 @@ DEMO_TOKENS: dict[str, Actor] = {
     "demo-admin-token": Actor(
         subject="user_demo_admin",
         organization_ids=["org_demo", "org_qc"],
-        permissions=["organizations:read", "experiments:write", "sequences:read", "mcp:read"],
+        permissions=["organizations:read", "experiments:write", "sequences:read", "mcp:read", "ai:run"],
     ),
     "org-demo-token": Actor(
         subject="user_demo_scientist",
         organization_ids=["org_demo"],
-        permissions=["organizations:read", "experiments:write", "sequences:read", "mcp:read"],
+        permissions=["organizations:read", "experiments:write", "sequences:read", "mcp:read", "ai:run"],
     ),
 }
 

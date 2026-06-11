@@ -1,89 +1,159 @@
 # Session Handover
+_Generated: 2026-06-07_
+_Branch: main_
+_Trigger: user request (end of session)_
 
-Date: 2026-05-11
+---
 
-## Current State
+## Active Task
 
-HelixOS is a starter monorepo scaffold with a FastAPI backend, Next.js frontend, shared JSON Schemas, shared TypeScript types, module docs, examples, and MCP connector registry metadata.
+**What we're building/fixing:**
+HelixOS — AI-native lab platform moving from starter kit toward production. Local dev is fully functional (browser + desktop). Documentation is connected. Data flows between UI, API, and audit store are wired.
 
-This directory is not currently a Git worktree, so use filesystem inspection rather than `git diff` until the project is initialized or moved into a repository.
+**Phase:** Post-MVP hardening — production readiness not started
+**Next action:** Commit uncommitted work, then pick first production item from Remaining Work below (recommend: Postgres persistence for ELN + audit, or JWT/OIDC auth)
 
-## Implemented This Session
+---
 
-- Added protected bearer-auth context for API routes.
-- Added stable API error envelope handling.
-- Added `auth` backend module:
-  - `GET /api/v1/organizations`
-  - local demo tokens mapped to visible organizations
-  - service-level organization access checks
-- Added `molecular` backend module:
-  - `GET /api/v1/sequences/{sequence_id}`
-  - seeded demo sequence metadata
-  - tenant-scoped sequence retrieval
-- Tightened existing routes:
-  - experiments create/list require auth
-  - experiment list is scoped to actor organizations
-  - modules and MCP connectors require auth
-- Updated API tests from 3 smoke tests to 9 behavior tests.
-- Added `schemas/auth/organization.schema.json`.
-- Added examples for organization and molecular sequence responses.
-- Added shared TypeScript types for `Organization`, `Sequence`, and sequence feature contracts.
-- Updated module docs and API contract docs.
-- Replaced interactive `next lint` script with `eslint .` and added `apps/web/eslint.config.mjs`.
-- Fixed frontend lint issues caused by unused imports and impure ID generation.
-- Updated `README.md` with API, auth, endpoints, and checks.
+## Completed This Session
 
-## Local Auth Tokens
+- [x] Connected documentation hub (`docs/README.md`, `docs/OVERVIEW.md`, cross-linked module docs, architecture flow diagrams)
+- [x] Root dev orchestration (`package.json`, `scripts/setup-dev.sh`, `dev-api.sh`, `dev-desktop.sh`, `.env.example`)
+- [x] Hash-chained audit storage (SQLite/Postgres) with verify endpoint
+- [x] Desktop shell fixes (CJS build, hydration, `window is not defined`, sidecar startup)
+- [x] Data flow fixes across web ↔ API ↔ audit:
+  - Agent session: one session per org (no refetch-create bug)
+  - Audit sidebar: invalidates after regulated actions, merged API + local activity
+  - ELN: `PATCH /api/v1/experiments/{id}` for status transitions + audit events
+  - Sequences: demo metadata from API (`seq_demo_reporter`)
+  - MCP: BioPython enabled by default; desktop-only guard; no fake connector success
+  - Organization picker for multi-org tokens
+- [x] API client: `getSequence()`, `updateExperimentStatus()`
+- [x] Tests: 26 passing (3 new ELN/audit tests)
 
-Use these only for local starter-kit development:
+---
 
-- `demo-admin-token`: access to `org_demo` and `org_qc`.
-- `org-demo-token`: access to `org_demo`.
+## In Progress (Exact Resume Point)
 
-Example:
+**Branch:** `main`
+**Last commit:** `7802bbf Implement HelixOS starter platform`
+**Working tree:** Large uncommitted diff — all session work is local only, not committed
+
+**Next immediate action:**
+1. Review `git status` and commit session work (or split into logical commits)
+2. Run `npm run dev:browser` or `npm run dev:desktop` to verify stack still starts
+3. Pick production milestone from Remaining Work
+
+---
+
+## Remaining Work (Production Path)
+
+### P0 — Foundation
+1. **Commit current work** — significant uncommitted changes on `main`
+2. **Postgres persistence** — ELN experiments currently in-memory; wire SQLAlchemy repositories
+3. **Auth for production** — replace demo bearer tokens with JWT/OIDC validation
+4. **Environment config** — production `.env` templates, secrets management, CORS lockdown
+
+### P1 — Core product
+5. **Inventory module** — scaffold `helixos/inventory` per AGENTS.md; replace local UI prototype
+6. **Audit verify in UI** — expose `GET /api/v1/audit/verify` in workspace sidebar
+7. **ELN persistence** — experiments survive API restart; add experiment edit/blocks API
+8. **Sequence storage** — full sequence content (not just metadata); import FASTA/GenBank
+
+### P2 — Desktop & release
+9. **Desktop packaging CI** — `npm run pack` with embedded Python on all platforms
+10. **Auto-update URL** — replace placeholder `releases.helixos.example`
+11. **Code signing / notarization** — macOS/Windows release pipeline
+12. **Static web export** — packaged desktop loads bundled web, not Next dev server
+
+### P3 — Planned domains
+13. **Biobank module** — samples, aliquots, chain of custody
+14. **Workflows module** — SOP state machines, approvals (replace local diagnostic workflow UI)
+15. **Additional MCP connectors** — PubMed, BLAST, etc. (registry metadata exists today)
+
+---
+
+## Architecture Decisions Made
+
+| Decision | Rationale | Date |
+| --- | --- | --- |
+| Doc hub at `docs/README.md` | Single reading order; modules cross-link | 2026-06-07 |
+| Agent session via `useEffect`, not `useQuery` | POST-as-fetch created duplicate sessions + audit noise | 2026-06-07 |
+| ELN status via PATCH + audit | Replaces local-only UI overrides; production-ready pattern | 2026-06-07 |
+| BioPython `enabled_by_default: true` | Stdio connector is primary desktop use case | 2026-06-07 |
+| Audit invalidation after regulated actions | Sidebar stayed stale without explicit refetch | 2026-06-07 |
+| Desktop CJS build (`.cjs`) | ESM broke `electron-updater` at launch | 2026-06-07 |
+| SQLite audit for local/desktop dev | Postgres for server; memory for CI | 2026-06-07 |
+
+---
+
+## Commands to Resume
 
 ```bash
-curl -H "Authorization: Bearer org-demo-token" \
-  http://127.0.0.1:8000/api/v1/organizations
+cd ~/projects/helixos
+git status                    # review uncommitted work
+npm run setup                 # if fresh machine
+npm run dev:browser           # browser: API :8000 + web :3000
+npm run dev:desktop           # desktop: sidecar :8765 + MCP :8766
+npm run test:api              # 26 pytest tests
+
+# Audit with SQLite (browser dev):
+export HELIX_DATABASE_URL=sqlite:///$(pwd)/.data/helixos-dev.db
+npm run dev:api
 ```
 
-## Verification Commands
+Demo tokens: `org-demo-token` (org_demo), `demo-admin-token` (org_demo + org_qc)
 
-Backend:
+---
 
-```bash
-cd /Users/theranosis_dx/projects/helixos/services/api
-pytest
+## Files Modified This Session
+
+| Area | Key files |
+| --- | --- |
+| Documentation | `README.md`, `SYSTEM_ARCHITECTURE.md`, `docs/README.md`, `docs/OVERVIEW.md`, `docs/modules/*.md`, `AGENTS.md`, `API_CONTRACTS.md` |
+| Web UI | `apps/web/components/workspace-app.tsx`, `apps/web/hooks/use-helix-api.ts`, `apps/web/components/agent/agent-panel.tsx`, `apps/web/lib/*` |
+| API client | `packages/api-client/src/index.ts`, `packages/types/src/index.ts` |
+| Backend ELN | `services/api/helixos/eln/{router,service,schemas}.py` |
+| Backend audit/AI/MCP | `services/api/helixos/audit/`, `services/api/helixos/ai/`, `services/api/helixos/mcp/` |
+| Desktop | `apps/desktop/` (Electron shell, sidecar, MCP bridge) |
+| Dev scripts | `package.json`, `scripts/dev-*.sh`, `.env.example` |
+| Tests | `services/api/tests/test_api.py` (+ audit, hash_chain, ai_providers) |
+
+---
+
+## Git Context
+
+```
+Branch  : main
+Commit  : 7802bbf Implement HelixOS starter platform
+Status  : dirty (extensive uncommitted changes — see git status)
 ```
 
-Frontend:
-
-```bash
-cd /Users/theranosis_dx/projects/helixos/apps/web
-npm run lint
-npm run typecheck
-npm run build
+Recent commits:
+```
+7802bbf Implement HelixOS starter platform
 ```
 
-Last known result: all commands passed.
+---
 
-## Known Follow-Ups
+## Critical Rules
 
-- Replace local demo bearer-token parsing with signed JWT validation through OIDC/JWKS.
-- Add durable database models and repositories for auth, ELN, molecular records, and audit events.
-- Wire the frontend to the API and shared `@helixos/types` contracts; current UI still uses local demo state.
-- Add generated client/types workflow from JSON Schemas or OpenAPI.
-- Add missing domain modules for inventory, biobank, workflows, and AI as real backend modules.
-- Add schema validation tests for every JSON Schema example.
-- Address `npm audit` report when Next provides a non-breaking fix for its transitive `postcss` advisory. Current audit suggests a breaking downgrade, so it was not applied.
-- Remove local generated artifacts (`.DS_Store`, `.next`, `node_modules`, `__pycache__`, `.pytest_cache`) before publishing if this folder becomes a Git repository.
+- Never commit secrets (`.env`, credentials, API keys)
+- Read [AGENTS.md](AGENTS.md) and [docs/README.md](docs/README.md) before adding modules
+- Update tests + API_CONTRACTS.md for every behavior change
+- Inventory/workflow UI is prototype-only until backend modules exist
 
-## Important Files
+---
 
-- `/Users/theranosis_dx/projects/helixos/API_CONTRACTS.md`
-- `/Users/theranosis_dx/projects/helixos/services/api/helixos/auth/service.py`
-- `/Users/theranosis_dx/projects/helixos/services/api/helixos/eln/service.py`
-- `/Users/theranosis_dx/projects/helixos/services/api/helixos/molecular/service.py`
-- `/Users/theranosis_dx/projects/helixos/services/api/tests/test_api.py`
-- `/Users/theranosis_dx/projects/helixos/packages/types/src/index.ts`
-- `/Users/theranosis_dx/projects/helixos/apps/web/eslint.config.mjs`
+## Verification Checklist (Last Known Good)
+
+- [x] `npm run test:api` — 26 tests pass
+- [x] `npx tsc --noEmit` in `apps/web` — clean
+- [x] Browser dev: ELN create/list/status, sequences metadata, agent SSE, audit sidebar
+- [x] Desktop dev: sidecar :8765, MCP bridge :8766, BioPython connector jobs
+- [ ] Production deploy — not attempted
+- [ ] `npm run pack` full desktop release — not verified end-to-end
+
+---
+
+_Auto-updated at session end. Read this at the start of the next session._

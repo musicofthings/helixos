@@ -1,0 +1,18 @@
+{
+  "name": "helixos",
+  "version": "0.1.0",
+  "private": true,
+  "description": "HelixOS monorepo dev orchestration",
+  "scripts": {
+    "setup": "bash scripts/setup-dev.sh",
+    "dev:api": "bash scripts/dev-api.sh",
+    "dev:web": "npm run dev --prefix apps/web",
+    "dev:browser": "concurrently -k -n api,web -c green,cyan \"npm run dev:api\" \"wait-on http-get://127.0.0.1:8000/health && npm run dev:web\"",
+    "dev:desktop": "bash scripts/dev-desktop.sh",
+    "test:api": "bash scripts/test-api.sh"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.0",
+    "wait-on": "^8.0.1"
+  }
+}

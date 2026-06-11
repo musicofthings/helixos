@@ -8,6 +8,10 @@ node_modules/
 .next/
 out/
 dist/
+*.tsbuildinfo
+*.egg-info/
+apps/desktop/resources/
+apps/desktop/release/
 
 .env
 .env.*
@@ -15,3 +19,4 @@ dist/
 
 postgres_data/
 minio_data/
+.data/

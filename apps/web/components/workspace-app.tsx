@@ -3,12 +3,11 @@
 import {
   Activity,
   Beaker,
-  BrainCircuit,
   CheckCircle2,
   ClipboardList,
   Dna,
   FlaskConical,
-  History,
+  LoaderCircle,
   Network,
   PackagePlus,
   Play,
@@ -18,23 +17,30 @@ import {
   ShieldCheck,
   TestTube2,
   ToggleLeft,
-  ToggleRight,
-  Wand2
+  ToggleRight
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
-import { FormEvent, useMemo, useRef, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+
+import { AgentPanel } from "./agent/agent-panel";
+import { CommandPalette, useCommandPaletteShortcut, type CommandPaletteItem } from "./shell/command-palette";
+import {
+  useAgentSession,
+  useAuditEvents,
+  useConnectors,
+  useCreateExperiment,
+  useExperiments,
+  useOrganizations,
+  useRunConnectorJob,
+  useSequence,
+  useUpdateExperimentStatus
+} from "../hooks/use-helix-api";
+import { useDesktopShell } from "../hooks/use-desktop-shell";
+import { formatAuditEventMessage } from "../lib/audit-display";
+import { canTransitionExperiment, type ExperimentViewModel } from "../lib/experiment-display";
+import { getApiBaseUrl } from "../lib/api-config";
 
 type View = "workspace" | "experiments" | "sequences" | "inventory" | "connectors";
-
-type Experiment = {
-  id: string;
-  title: string;
-  project: string;
-  owner: string;
-  status: "Draft" | "In review" | "Signed";
-  updated: string;
-  blocks: string[];
-};
 
 type Reagent = {
   id: string;
@@ -46,7 +52,7 @@ type Reagent = {
   status: "OK" | "Low" | "Expiring" | "Out";
 };
 
-type Connector = {
+type ConnectorState = {
   id: string;
   name: string;
   scopes: string[];
@@ -54,43 +60,16 @@ type Connector = {
   lastRun: string;
 };
 
-type ActivityEvent = {
-  id: string;
-  message: string;
-};
-
-const initialExperiments: Experiment[] = [
-  {
-    id: "EXP-1042",
-    title: "Gibson assembly of reporter plasmid",
-    project: "Cloning",
-    owner: "Dr. Rao",
-    status: "Draft",
-    updated: "Today 09:20",
-    blocks: ["Assembly plan", "Vector backbone", "Reporter insert"]
-  },
-  {
-    id: "EXP-1038",
-    title: "Library prep QC for lung panel",
-    project: "Diagnostics",
-    owner: "Meera",
-    status: "In review",
-    updated: "Yesterday 17:42",
-    blocks: ["Qubit results", "TapeStation trace", "Reviewer notes"]
-  }
-];
-
 const initialInventory: Reagent[] = [
   { id: "RG-201", name: "Q5 polymerase", lot: "M0491X", stock: 7, unit: "tubes", expires: "2026-09-18", status: "OK" },
   { id: "RG-188", name: "Gibson master mix", lot: "GMM-44", stock: 2, unit: "vials", expires: "2026-06-02", status: "Low" },
   { id: "RG-144", name: "Ampicillin", lot: "AMP-9B", stock: 1, unit: "bottle", expires: "2026-05-29", status: "Expiring" }
 ];
 
-const initialConnectors: Connector[] = [
-  { id: "biopython-local", name: "BioPython Local", scopes: ["sequence:read", "sequence:analyze"], enabled: true, lastRun: "Idle" },
-  { id: "pubmed", name: "PubMed", scopes: ["literature:search"], enabled: false, lastRun: "Never" },
-  { id: "blast", name: "BLAST", scopes: ["sequence:search", "job:run"], enabled: false, lastRun: "Never" }
-];
+type ActivityEvent = {
+  id: string;
+  message: string;
+};
 
 const workflow = ["Sample Received", "DNA Extraction", "QC", "Library Prep", "Sequencing", "Analysis", "Reporting"];
 
@@ -145,14 +124,6 @@ function todayStamp() {
   }).format(new Date());
 }
 
-function nextExperimentId(experiments: Experiment[]) {
-  const highest = experiments.reduce((max, experiment) => {
-    const match = experiment.id.match(/^EXP-(\d+)$/);
-    return match ? Math.max(max, Number(match[1])) : max;
-  }, 1000);
-  return `EXP-${highest + 1}`;
-}
-
 function nextReagentId(inventory: Reagent[]) {
   const highest = inventory.reduce((max, item) => {
     const match = item.id.match(/^RG-(\d+)$/);
@@ -174,35 +145,76 @@ function deriveReagentStatus(stock: number, expires: string): Reagent["status"] 
   return "OK";
 }
 
-function canTransitionExperiment(from: Experiment["status"], to: Experiment["status"]) {
-  if (from === to) return false;
-  if (from === "Signed") return false;
-  if (to === "In review") return from === "Draft";
-  if (to === "Signed") return from === "In review";
-  return false;
-}
+const DEMO_SEQUENCE_ID = "seq_demo_reporter";
 
-export function WorkspaceApp() {
+export function WorkspaceApp({ initialDesktopShell = false }: { initialDesktopShell?: boolean }) {
+  const { isDesktop, sidecarStatus, canRestartSidecar } = useDesktopShell(initialDesktopShell);
+  const apiEnabled = !isDesktop || sidecarStatus === "ready";
+
+  const organizationsQuery = useOrganizations(apiEnabled);
+  const experimentsQuery = useExperiments(apiEnabled);
+  const connectorsQuery = useConnectors(apiEnabled);
+
+  const [selectedOrganizationId, setSelectedOrganizationId] = useState<string | undefined>();
+  const primaryOrganizationId = selectedOrganizationId ?? organizationsQuery.data?.[0]?.id;
+
+  const createExperimentMutation = useCreateExperiment(primaryOrganizationId);
+  const updateExperimentStatusMutation = useUpdateExperimentStatus(primaryOrganizationId);
+  const runConnectorJobMutation = useRunConnectorJob(primaryOrganizationId);
+
+  const auditEventsQuery = useAuditEvents(primaryOrganizationId, apiEnabled);
+  const agentSession = useAgentSession(primaryOrganizationId, apiEnabled);
+  const demoSequenceQuery = useSequence(DEMO_SEQUENCE_ID, apiEnabled && Boolean(primaryOrganizationId));
+
+  const experiments = useMemo(() => experimentsQuery.data ?? [], [experimentsQuery.data]);
   const [activeView, setActiveView] = useState<View>("workspace");
-  const [experiments, setExperiments] = useState(initialExperiments);
-  const [selectedExperimentId, setSelectedExperimentId] = useState(initialExperiments[0].id);
+  const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
+  const [selectedExperimentId, setSelectedExperimentId] = useState<string | undefined>();
   const [inventory, setInventory] = useState(initialInventory);
-  const [connectors, setConnectors] = useState(initialConnectors);
+  const [connectorState, setConnectorState] = useState<Record<string, Pick<ConnectorState, "enabled" | "lastRun">>>({});
   const [workflowStep, setWorkflowStep] = useState(2);
   const [sequence, setSequence] = useState(defaultSequence);
+  const [loadedSequenceName, setLoadedSequenceName] = useState<string | undefined>();
   const [search, setSearch] = useState("");
   const [draftTitle, setDraftTitle] = useState("");
   const [draftProject, setDraftProject] = useState("Cloning");
   const [draftBlock, setDraftBlock] = useState("Objective\nDesign and document the next wet-lab step.");
-  const [copilotNote, setCopilotNote] = useState("Ready to summarize an experiment or suggest next steps.");
   const [activity, setActivity] = useState<ActivityEvent[]>([
-    { id: "seed-1", message: "Workspace opened" },
-    { id: "seed-2", message: "BioPython Local connector available" },
-    { id: "seed-3", message: "EXP-1038 moved to review" }
+    { id: "seed-1", message: "Workspace opened" }
   ]);
   const activityCounter = useRef(0);
 
-  const selectedExperiment = experiments.find((experiment) => experiment.id === selectedExperimentId) ?? experiments[0];
+  useEffect(() => {
+    if (!selectedExperimentId && experiments.length > 0) {
+      setSelectedExperimentId(experiments[0].id);
+    }
+  }, [experiments, selectedExperimentId]);
+
+  const displayExperiments = experiments;
+
+  const connectorRegistry = useMemo(() => connectorsQuery.data ?? [], [connectorsQuery.data]);
+  const connectorTransportById = useMemo(
+    () => new Map(connectorRegistry.map((connector) => [connector.id, connector.transport])),
+    [connectorRegistry]
+  );
+
+  const selectedExperiment =
+    displayExperiments.find((experiment) => experiment.id === selectedExperimentId) ??
+    displayExperiments[0] ??
+    null;
+
+  const connectors: ConnectorState[] = useMemo(() => {
+    return connectorRegistry.map((connector) => {
+      const state = connectorState[connector.id];
+      return {
+        id: connector.id,
+        name: connector.name,
+        scopes: connector.scopes,
+        enabled: state?.enabled ?? connector.enabled_by_default,
+        lastRun: state?.lastRun ?? "Idle"
+      };
+    });
+  }, [connectorRegistry, connectorState]);
   const cleanSequence = cleanDna(sequence);
   const sequenceStats = useMemo(
     () => ({
@@ -213,9 +225,33 @@ export function WorkspaceApp() {
     [cleanSequence]
   );
 
-  const filteredExperiments = experiments.filter((experiment) =>
+  const filteredExperiments = displayExperiments.filter((experiment) =>
     [experiment.title, experiment.project, experiment.owner, experiment.status].join(" ").toLowerCase().includes(search.toLowerCase())
   );
+
+  const auditTrailItems = useMemo(() => {
+    const apiItems =
+      auditEventsQuery.data?.map((event) => ({
+        id: event.id,
+        message: formatAuditEventMessage(event)
+      })) ?? [];
+    const localItems = activity.map((item) => ({ id: item.id, message: item.message }));
+    const seen = new Set<string>();
+    const merged = [];
+
+    for (const item of [...apiItems, ...localItems]) {
+      if (seen.has(item.id)) {
+        continue;
+      }
+      seen.add(item.id);
+      merged.push(item);
+      if (merged.length >= 5) {
+        break;
+      }
+    }
+
+    return merged;
+  }, [activity, auditEventsQuery.data]);
 
   function log(message: string) {
     activityCounter.current += 1;
@@ -225,44 +261,52 @@ export function WorkspaceApp() {
 
   function createExperiment(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!draftTitle.trim()) return;
+    if (!draftTitle.trim() || !primaryOrganizationId) return;
 
-    const experiment: Experiment = {
-      id: nextExperimentId(experiments),
-      title: draftTitle.trim(),
-      project: draftProject,
-      owner: "You",
-      status: "Draft",
-      updated: "Just now",
-      blocks: draftBlock
-        .split("\n")
-        .map((block) => block.trim())
-        .filter(Boolean)
-    };
+    const blocks = draftBlock
+      .split("\n")
+      .map((block) => block.trim())
+      .filter(Boolean);
 
-    if (!experiment.blocks.length) {
-      experiment.blocks = ["Untitled note"];
-    }
-
-    setExperiments((items) => [experiment, ...items]);
-    setSelectedExperimentId(experiment.id);
-    setActiveView("experiments");
-    setDraftTitle("");
-    log(`Created ${experiment.id}`);
+    createExperimentMutation.mutate(
+      {
+        organizationId: primaryOrganizationId,
+        title: draftTitle.trim(),
+        projectId: draftProject.toLowerCase().replace(/\s+/g, "_"),
+        blocks: blocks.length ? blocks : ["Untitled note"]
+      },
+      {
+        onSuccess: (experiment) => {
+          setSelectedExperimentId(experiment.id);
+          setActiveView("experiments");
+          setDraftTitle("");
+          log(`Created ${experiment.id}`);
+        },
+        onError: (error) => {
+          log(error instanceof Error ? error.message : "Failed to create experiment");
+        }
+      }
+    );
   }
 
-  function updateExperimentStatus(status: Experiment["status"]) {
+  function updateExperimentStatus(status: ExperimentViewModel["status"]) {
+    if (!selectedExperiment) return;
     if (!canTransitionExperiment(selectedExperiment.status, status)) {
       log(`Blocked ${selectedExperiment.id} transition from ${selectedExperiment.status} to ${status}`);
       return;
     }
 
-    setExperiments((items) =>
-      items.map((experiment) =>
-        experiment.id === selectedExperiment.id ? { ...experiment, status, updated: "Just now" } : experiment
-      )
+    updateExperimentStatusMutation.mutate(
+      { experimentId: selectedExperiment.id, status },
+      {
+        onSuccess: (experiment) => {
+          log(`${experiment.id} marked ${experiment.status}`);
+        },
+        onError: (error) => {
+          log(error instanceof Error ? error.message : `Failed to update ${selectedExperiment.id}`);
+        }
+      }
     );
-    log(`${selectedExperiment.id} marked ${status}`);
   }
 
   function consumeReagent(id: string) {
@@ -308,28 +352,131 @@ export function WorkspaceApp() {
 
   function toggleConnector(id: string) {
     const connector = connectors.find((item) => item.id === id);
-    setConnectors((items) => items.map((item) => (item.id === id ? { ...item, enabled: !item.enabled } : item)));
+    setConnectorState((items) => ({
+      ...items,
+      [id]: {
+        enabled: !(items[id]?.enabled ?? connector?.enabled ?? false),
+        lastRun: items[id]?.lastRun ?? connector?.lastRun ?? "Idle"
+      }
+    }));
     log(`${connector?.enabled ? "Disabled" : "Enabled"} connector ${id}`);
   }
 
-  function runConnector(id: string) {
-    const connector = connectors.find((item) => item.id === id);
-    if (!connector?.enabled) {
-      log(`Blocked disabled connector ${id}`);
-      return;
-    }
-    setConnectors((items) => items.map((item) => (item.id === id ? { ...item, lastRun: "Completed just now" } : item)));
-    log(`Ran connector job ${id}`);
-  }
+  const runConnector = useCallback(
+    (id: string) => {
+      const connector = connectors.find((item) => item.id === id);
+      if (!connector?.enabled) {
+        log(`Blocked disabled connector ${id}`);
+        return;
+      }
 
-  function generateCopilotNote() {
-    const note = `${selectedExperiment.id}: ${selectedExperiment.title}. Suggested next action: verify ${sequenceStats.length} bp sequence context, confirm reagent lots, then move record to review when observations are entered.`;
-    setCopilotNote(note);
-    log("Generated copilot note");
-  }
+      const transport = connectorTransportById.get(id);
+      if (transport === "stdio" && !isDesktop) {
+        log(`${id} requires the desktop shell and MCP bridge`);
+        return;
+      }
+
+      if (id === "biopython-local") {
+        runConnectorJobMutation.mutate(
+          {
+            connectorId: id,
+            tool: "analyze_sequence",
+            arguments: { sequence: cleanSequence }
+          },
+          {
+            onSuccess: (result) => {
+              const summary =
+                result.result && typeof result.result === "object" && "length" in (result.result as object)
+                  ? `${String((result.result as { length: unknown }).length)} bp · ${String((result.result as { gc_percent?: unknown }).gc_percent ?? "?")}% GC`
+                  : "completed";
+              setConnectorState((items) => ({
+                ...items,
+                [id]: { enabled: true, lastRun: summary }
+              }));
+              log(`Ran ${id} analyze_sequence (${summary})`);
+            },
+            onError: (error) => {
+              const message = error instanceof Error ? error.message : `Failed to run connector ${id}`;
+              setConnectorState((items) => ({
+                ...items,
+                [id]: { enabled: true, lastRun: "Failed" }
+              }));
+              log(message);
+            }
+          }
+        );
+        return;
+      }
+
+      log(`${id} is registered but remote dispatch is not configured yet`);
+    },
+    [cleanSequence, connectorTransportById, connectors, isDesktop, runConnectorJobMutation]
+  );
+
+  const runAgentQuickPrompt = useCallback(() => {
+    setActiveView("workspace");
+    log("Open the lab agent panel to run a quick prompt");
+  }, []);
+
+  const commandItems = useMemo<CommandPaletteItem[]>(
+    () => [
+      { id: "nav-workspace", label: "Go to workspace", group: "Navigate", run: () => setActiveView("workspace") },
+      { id: "nav-experiments", label: "Go to experiments", group: "Navigate", run: () => setActiveView("experiments") },
+      { id: "nav-sequences", label: "Go to sequences", group: "Navigate", run: () => setActiveView("sequences") },
+      { id: "nav-inventory", label: "Go to inventory", group: "Navigate", run: () => setActiveView("inventory") },
+      { id: "nav-connectors", label: "Go to connectors", group: "Navigate", run: () => setActiveView("connectors") },
+      {
+        id: "create-experiment",
+        label: "Create new experiment",
+        group: "Lab",
+        keywords: ["draft", "eln"],
+        run: () => setActiveView("experiments")
+      },
+      {
+        id: "analyze-sequence",
+        label: "Analyze current sequence with BioPython Local",
+        group: "Connectors",
+        keywords: ["mcp", "biopython", "sequence"],
+        disabled: !isDesktop || !connectors.some((connector) => connector.id === "biopython-local" && connector.enabled),
+        run: () => runConnector("biopython-local")
+      },
+      {
+        id: "agent-prompt",
+        label: "Open lab agent quick prompt",
+        group: "Agent",
+        keywords: ["copilot", "ai"],
+        run: runAgentQuickPrompt
+      },
+      {
+        id: "restart-sidecar",
+        label: "Restart desktop API sidecar",
+        group: "Desktop",
+        disabled: !canRestartSidecar,
+        run: async () => {
+          if (!window.helixDesktopActions) {
+            return;
+          }
+          await window.helixDesktopActions.restartSidecar();
+          log("Restarted desktop API sidecar");
+        }
+      }
+    ],
+    [canRestartSidecar, connectors, isDesktop, runAgentQuickPrompt, runConnector]
+  );
+
+  useCommandPaletteShortcut(() => setCommandPaletteOpen(true));
+
+  const apiStatusMessage = organizationsQuery.error
+    ? isDesktop
+      ? "API sidecar unavailable. Restart the desktop shell or run npm run dev:desktop."
+      : `API unavailable at ${getApiBaseUrl()}. Run npm run dev:api or npm run dev:browser.`
+    : experimentsQuery.error
+      ? "Failed to load experiments from the API."
+      : null;
 
   return (
     <main className="min-h-screen bg-[#f7f8f5]">
+      <CommandPalette open={commandPaletteOpen} onOpenChange={setCommandPaletteOpen} items={commandItems} />
       <div className="mx-auto grid min-h-screen max-w-7xl lg:grid-cols-[270px_1fr]">
         <aside className="border-r border-black/10 bg-[#f1f4ef] px-5 py-6">
           <div className="text-xl font-semibold text-ink">HelixOS</div>
@@ -356,7 +503,7 @@ export function WorkspaceApp() {
               Audit trail
             </div>
             <div className="mt-3 grid gap-2 text-xs text-graphite">
-              {activity.slice(0, 5).map((item) => (
+              {auditTrailItems.map((item) => (
                 <div key={item.id} className="border-l-2 border-fern/30 pl-2">
                   {item.message}
                 </div>
@@ -372,7 +519,46 @@ export function WorkspaceApp() {
               <p className="mt-2 max-w-3xl text-sm leading-6 text-graphite">
                 Create records, analyze sequences, mutate inventory, run connector jobs, and move diagnostic workflow state from one working surface.
               </p>
+              {apiStatusMessage ? (
+                <p className="mt-2 rounded-md border border-signal/30 bg-[#eef6f7] px-3 py-2 text-xs text-signal">{apiStatusMessage}</p>
+              ) : null}
+              {isDesktop ? (
+                <p className="mt-2 inline-flex items-center gap-2 rounded-md border border-fern/20 bg-[#edf5ef] px-3 py-1 text-xs text-fern">
+                  Desktop shell · API sidecar {sidecarStatus ?? "ready"}
+                </p>
+              ) : null}
+              {organizationsQuery.data && organizationsQuery.data.length > 1 ? (
+                <label className="mt-2 flex items-center gap-2 text-xs text-graphite">
+                  Organization
+                  <select
+                    value={primaryOrganizationId ?? ""}
+                    onChange={(event) => setSelectedOrganizationId(event.target.value)}
+                    className="rounded-md border border-black/10 bg-white px-2 py-1 text-xs text-ink outline-none focus:border-fern"
+                  >
+                    {organizationsQuery.data.map((organization) => (
+                      <option key={organization.id} value={organization.id}>
+                        {organization.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              ) : null}
+              {organizationsQuery.isLoading || experimentsQuery.isLoading || agentSession.isPending ? (
+                <p className="mt-2 inline-flex items-center gap-2 text-xs text-graphite">
+                  <LoaderCircle size={14} className="animate-spin" />
+                  Syncing workspace data...
+                </p>
+              ) : null}
             </div>
+            <div className="flex flex-wrap items-center gap-2">
+            <button
+              onClick={() => setCommandPaletteOpen(true)}
+              className="inline-flex items-center gap-2 rounded-md border border-black/10 px-4 py-2 text-sm font-medium hover:bg-black/5"
+            >
+              <Search size={16} />
+              Command
+              <kbd className="rounded border border-black/10 px-1.5 py-0.5 text-[10px] text-graphite">⌘K</kbd>
+            </button>
             <button
               onClick={() => setActiveView("experiments")}
               className="inline-flex items-center gap-2 rounded-md bg-fern px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-[#1d513c]"
@@ -380,12 +566,13 @@ export function WorkspaceApp() {
               <Plus size={16} />
               New experiment
             </button>
+            </div>
           </header>
 
           {activeView === "workspace" && (
             <div className="mt-6 grid gap-4">
               <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-                <Metric icon={FlaskConical} label="Open experiments" value={String(experiments.length)} />
+                <Metric icon={FlaskConical} label="Open experiments" value={String(displayExperiments.length)} />
                 <Metric icon={Dna} label="Sequence length" value={`${sequenceStats.length} bp`} />
                 <Metric icon={TestTube2} label="Low stock items" value={String(inventory.filter((item) => item.status !== "OK").length)} />
                 <Metric icon={Network} label="Enabled connectors" value={String(connectors.filter((item) => item.enabled).length)} />
@@ -435,12 +622,28 @@ export function WorkspaceApp() {
               </section>
 
               <div className="grid gap-4 xl:grid-cols-[1.2fr_0.8fr]">
-                <ExperimentPanel
-                  experiment={selectedExperiment}
-                  onReview={() => updateExperimentStatus("In review")}
-                  onSign={() => updateExperimentStatus("Signed")}
+                {selectedExperiment ? (
+                  <ExperimentPanel
+                    experiment={selectedExperiment}
+                    onReview={() => updateExperimentStatus("In review")}
+                    onSign={() => updateExperimentStatus("Signed")}
+                  />
+                ) : (
+                  <section className="rounded-md border border-black/10 bg-white p-4 shadow-sm">
+                    <h2 className="text-sm font-semibold text-ink">No experiments yet</h2>
+                    <p className="mt-2 text-sm text-graphite">Create a draft experiment to populate the workspace.</p>
+                  </section>
+                )}
+                <AgentPanel
+                  organizationId={primaryOrganizationId}
+                  sessionId={agentSession.sessionId}
+                  context={{
+                    experiment_id: selectedExperiment?.id,
+                    experiment_title: selectedExperiment?.title,
+                    sequence_length: sequenceStats.length
+                  }}
+                  onActivity={log}
                 />
-                <CopilotPanel note={copilotNote} onGenerate={generateCopilotNote} />
               </div>
             </div>
           )}
@@ -485,10 +688,10 @@ export function WorkspaceApp() {
                     />
                   </label>
                   <button
-                    disabled={!draftTitle.trim()}
+                    disabled={!draftTitle.trim() || !primaryOrganizationId || createExperimentMutation.isPending}
                     className="inline-flex items-center justify-center gap-2 rounded-md bg-fern px-4 py-2 text-sm font-medium text-white hover:bg-[#1d513c] disabled:cursor-not-allowed disabled:bg-black/20"
                   >
-                    <Save size={16} />
+                    {createExperimentMutation.isPending ? <LoaderCircle size={16} className="animate-spin" /> : <Save size={16} />}
                     Save draft
                   </button>
                 </form>
@@ -508,23 +711,31 @@ export function WorkspaceApp() {
                   </label>
                 </div>
                 <div className="mt-4 grid gap-2">
-                  {filteredExperiments.map((experiment) => (
-                    <button
-                      key={experiment.id}
-                      onClick={() => setSelectedExperimentId(experiment.id)}
-                      className={`rounded-md border p-3 text-left transition ${
-                        experiment.id === selectedExperiment.id ? "border-fern bg-[#edf5ef]" : "border-black/10 hover:bg-black/5"
-                      }`}
-                    >
-                      <div className="flex flex-wrap items-center justify-between gap-2">
-                        <div className="text-sm font-semibold text-ink">{experiment.title}</div>
-                        <span className="rounded-md bg-[#eef1ed] px-2 py-1 text-xs text-graphite">{experiment.status}</span>
-                      </div>
-                      <div className="mt-2 text-xs text-graphite">
-                        {experiment.id} · {experiment.project} · {experiment.owner} · {experiment.updated}
-                      </div>
-                    </button>
-                  ))}
+                  {filteredExperiments.length ? (
+                    filteredExperiments.map((experiment) => (
+                      <button
+                        key={experiment.id}
+                        onClick={() => setSelectedExperimentId(experiment.id)}
+                        className={`rounded-md border p-3 text-left transition ${
+                          selectedExperiment && experiment.id === selectedExperiment.id
+                            ? "border-fern bg-[#edf5ef]"
+                            : "border-black/10 hover:bg-black/5"
+                        }`}
+                      >
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <div className="text-sm font-semibold text-ink">{experiment.title}</div>
+                          <span className="rounded-md bg-[#eef1ed] px-2 py-1 text-xs text-graphite">{experiment.status}</span>
+                        </div>
+                        <div className="mt-2 text-xs text-graphite">
+                          {experiment.id} · {experiment.project} · {experiment.owner} · {experiment.updated}
+                        </div>
+                      </button>
+                    ))
+                  ) : (
+                    <div className="rounded-md border border-black/10 bg-[#fbfbf8] p-4 text-sm text-graphite">
+                      No experiment records yet. Create one using the form on the left.
+                    </div>
+                  )}
                 </div>
               </section>
             </div>
@@ -533,17 +744,36 @@ export function WorkspaceApp() {
           {activeView === "sequences" && (
             <section className="mt-6 rounded-md border border-black/10 bg-white p-4 shadow-sm">
               <div className="flex flex-wrap items-center justify-between gap-3">
-                <h2 className="text-sm font-semibold text-ink">Sequence analyzer</h2>
+                <div>
+                  <h2 className="text-sm font-semibold text-ink">Sequence analyzer</h2>
+                  {loadedSequenceName ? (
+                    <p className="mt-1 text-xs text-graphite">
+                      Loaded from API: {loadedSequenceName}
+                      {demoSequenceQuery.data ? ` · ${demoSequenceQuery.data.length} bp metadata · ${demoSequenceQuery.data.topology}` : ""}
+                    </p>
+                  ) : null}
+                </div>
                 <button
                   onClick={() => {
                     setSequence(defaultSequence);
-                    log("Loaded demo plasmid sequence");
+                    setLoadedSequenceName(demoSequenceQuery.data?.name ?? DEMO_SEQUENCE_ID);
+                    log(`Loaded demo sequence ${DEMO_SEQUENCE_ID} from API`);
                   }}
-                  className="rounded-md border border-black/10 px-3 py-2 text-xs font-medium hover:bg-black/5"
+                  disabled={demoSequenceQuery.isLoading}
+                  className="rounded-md border border-black/10 px-3 py-2 text-xs font-medium hover:bg-black/5 disabled:cursor-not-allowed disabled:bg-black/5"
                 >
-                  Load demo sequence
+                  {demoSequenceQuery.isLoading ? "Loading demo..." : "Load demo sequence"}
                 </button>
               </div>
+              {demoSequenceQuery.data?.features.length ? (
+                <div className="mt-4 flex flex-wrap gap-2">
+                  {demoSequenceQuery.data.features.map((feature) => (
+                    <span key={`${feature.name}-${feature.start}`} className="rounded-md bg-[#eef1ed] px-2 py-1 text-xs text-graphite">
+                      {feature.name} ({feature.start}-{feature.end})
+                    </span>
+                  ))}
+                </div>
+              ) : null}
               <div className="mt-4 grid gap-4 xl:grid-cols-[1fr_340px]">
                 <textarea
                   aria-label="DNA sequence"
@@ -576,6 +806,9 @@ export function WorkspaceApp() {
 
           {activeView === "inventory" && (
             <div className="mt-6 grid gap-4 xl:grid-cols-[360px_1fr]">
+              <p className="xl:col-span-2 rounded-md border border-black/10 bg-[#fbfbf8] px-3 py-2 text-xs text-graphite">
+                Inventory is a local prototype. Changes are not persisted or audited until the inventory module is implemented.
+              </p>
               <section className="rounded-md border border-black/10 bg-white p-4 shadow-sm">
                 <h2 className="text-sm font-semibold text-ink">Add reagent</h2>
                 <form onSubmit={addReagent} className="mt-4 grid gap-3">
@@ -623,13 +856,26 @@ export function WorkspaceApp() {
           {activeView === "connectors" && (
             <section className="mt-6 rounded-md border border-black/10 bg-white p-4 shadow-sm">
               <h2 className="text-sm font-semibold text-ink">MCP connector registry</h2>
+              {!isDesktop ? (
+                <p className="mt-2 rounded-md border border-black/10 bg-[#fbfbf8] px-3 py-2 text-xs text-graphite">
+                  Stdio connectors such as BioPython Local require the desktop shell (`npm run dev:desktop`) with the MCP bridge on port 8766.
+                </p>
+              ) : null}
               <div className="mt-4 grid gap-3">
-                {connectors.map((connector) => (
+                {connectors.map((connector) => {
+                  const transport = connectorTransportById.get(connector.id);
+                  const requiresDesktop = transport === "stdio";
+                  const canRun = connector.enabled && (!requiresDesktop || isDesktop) && connector.id === "biopython-local";
+
+                  return (
                   <div key={connector.id} className="grid gap-3 rounded-md border border-black/10 p-4 md:grid-cols-[1fr_auto] md:items-center">
                     <div>
                       <div className="flex items-center gap-2 text-sm font-semibold text-ink">
                         {connector.enabled ? <CheckCircle2 size={16} className="text-fern" /> : <Network size={16} className="text-graphite" />}
                         {connector.name}
+                        {requiresDesktop ? (
+                          <span className="rounded-md bg-[#eef1ed] px-2 py-0.5 text-[10px] font-medium uppercase text-graphite">Desktop</span>
+                        ) : null}
                       </div>
                       <div className="mt-2 flex flex-wrap gap-2">
                         {connector.scopes.map((scope) => (
@@ -646,7 +892,7 @@ export function WorkspaceApp() {
                       </button>
                       <button
                         onClick={() => runConnector(connector.id)}
-                        disabled={!connector.enabled}
+                        disabled={!canRun || runConnectorJobMutation.isPending}
                         className="inline-flex items-center gap-2 rounded-md bg-fern px-3 py-2 text-xs font-medium text-white disabled:cursor-not-allowed disabled:bg-black/20"
                       >
                         <Play size={14} />
@@ -654,7 +900,8 @@ export function WorkspaceApp() {
                       </button>
                     </div>
                   </div>
-                ))}
+                  );
+                })}
               </div>
             </section>
           )}
@@ -681,7 +928,7 @@ function ExperimentPanel({
   onReview,
   onSign
 }: {
-  experiment: Experiment;
+  experiment: ExperimentViewModel;
   onReview: () => void;
   onSign: () => void;
 }) {
@@ -720,28 +967,6 @@ function ExperimentPanel({
             {block}
           </div>
         ))}
-      </div>
-    </section>
-  );
-}
-
-function CopilotPanel({ note, onGenerate }: { note: string; onGenerate: () => void }) {
-  return (
-    <section className="rounded-md border border-black/10 bg-white p-4 shadow-sm">
-      <div className="flex items-center justify-between gap-3">
-        <div className="flex items-center gap-2 text-sm font-semibold text-ink">
-          <BrainCircuit size={17} />
-          Lab copilot
-        </div>
-        <button onClick={onGenerate} className="inline-flex items-center gap-2 rounded-md border border-black/10 px-3 py-2 text-xs font-medium hover:bg-black/5">
-          <Wand2 size={14} />
-          Generate
-        </button>
-      </div>
-      <p className="mt-4 rounded-md bg-[#fbfbf8] p-3 text-sm leading-6 text-graphite">{note}</p>
-      <div className="mt-4 flex items-center gap-2 text-xs text-graphite">
-        <History size={14} />
-        Suggestions are stored in the local session audit trail.
       </div>
     </section>
   );

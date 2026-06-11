@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends
 
 from helixos.auth.schemas import Actor
 from helixos.auth.service import get_current_actor
-from helixos.eln.schemas import Experiment, ExperimentCreate
+from helixos.eln.schemas import Experiment, ExperimentCreate, ExperimentStatusUpdate
 from helixos.eln.service import experiment_service
 
 router = APIRouter(prefix="/experiments", tags=["eln"])
@@ -20,3 +20,13 @@ def create_experiment(payload: ExperimentCreate, actor: Actor = Depends(get_curr
 def list_experiments(actor: Actor = Depends(get_current_actor)) -> list[Experiment]:
     """List experiment records visible to the caller."""
     return experiment_service.list_experiments(actor=actor)
+
+
+@router.patch("/{experiment_id}", response_model=Experiment)
+def update_experiment_status(
+    experiment_id: str,
+    payload: ExperimentStatusUpdate,
+    actor: Actor = Depends(get_current_actor),
+) -> Experiment:
+    """Update experiment lifecycle status."""
+    return experiment_service.update_status(experiment_id, payload, actor=actor)

@@ -1,5 +1,7 @@
 # Domain Glossary
 
+Lab-domain terms used across HelixOS documentation and schemas. For how modules map to these concepts, see [docs/OVERVIEW.md](docs/OVERVIEW.md) and [docs/README.md](docs/README.md).
+
 - **Aliquot**: A measured portion of a sample stored or used separately.
 - **Audit event**: Immutable event describing who did what, when, and why.
 - **Biobank**: Managed storage system for biological samples and metadata.

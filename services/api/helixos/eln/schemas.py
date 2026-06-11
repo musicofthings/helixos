@@ -46,6 +46,12 @@ class ExperimentCreate(BaseModel):
     blocks: list[ExperimentBlock] = Field(default_factory=list)
 
 
+class ExperimentStatusUpdate(BaseModel):
+    """Payload for updating experiment lifecycle status."""
+
+    status: ExperimentStatus
+
+
 class Experiment(ExperimentCreate):
     """Persisted experiment representation."""
 

@@ -1,0 +1,62 @@
+{
+  "appId": "com.helixos.desktop",
+  "productName": "HelixOS",
+  "directories": {
+    "output": "release",
+    "buildResources": "build"
+  },
+  "files": [
+    "out/**/*",
+    "package.json"
+  ],
+  "extraResources": [
+    {
+      "from": "resources/web",
+      "to": "web"
+    },
+    {
+      "from": "resources/api",
+      "to": "api"
+    },
+    {
+      "from": "resources/mcp",
+      "to": "mcp"
+    },
+    {
+      "from": "resources/bin",
+      "to": "bin",
+      "filter": ["**/*"]
+    },
+    {
+      "from": "resources/python",
+      "to": "python",
+      "filter": ["**/*"]
+    },
+    {
+      "from": "resources/pyvenv",
+      "to": "pyvenv",
+      "filter": ["**/*"]
+    }
+  ],
+  "publish": [
+    {
+      "provider": "generic",
+      "url": "https://releases.helixos.example/desktop"
+    }
+  ],
+  "mac": {
+    "category": "public.app-category.productivity",
+    "target": ["dir", "dmg"],
+    "hardenedRuntime": true,
+    "gatekeeperAssess": false,
+    "entitlements": "build/entitlements.mac.plist",
+    "entitlementsInherit": "build/entitlements.mac.plist"
+  },
+  "win": {
+    "target": ["dir", "nsis"],
+    "publisherName": "HelixOS"
+  },
+  "linux": {
+    "target": ["dir", "AppImage"]
+  }
+}
