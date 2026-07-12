@@ -12,6 +12,9 @@ import { createHelixClient } from "../../lib/api-config";
 type AgentPanelProps = {
   organizationId?: string;
   sessionId?: string;
+  sessionError?: Error | null;
+  sessionPending?: boolean;
+  onRetrySession?: () => void;
   context: AgentRunContext;
   onActivity: (message: string) => void;
 };
@@ -22,7 +25,15 @@ type ChatMessage = {
   content: string;
 };
 
-export function AgentPanel({ organizationId, sessionId, context, onActivity }: AgentPanelProps) {
+export function AgentPanel({
+  organizationId,
+  sessionId,
+  sessionError,
+  sessionPending,
+  onRetrySession,
+  context,
+  onActivity
+}: AgentPanelProps) {
   const queryClient = useQueryClient();
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
@@ -133,6 +144,21 @@ export function AgentPanel({ organizationId, sessionId, context, onActivity }: A
 
       {!organizationId ? (
         <p className="mt-4 rounded-md bg-[#fbfbf8] p-3 text-sm text-graphite">Connect to the API to start an agent session.</p>
+      ) : sessionError && !sessionId ? (
+        <div className="mt-4 rounded-md border border-signal/30 bg-[#eef6f7] p-3 text-sm text-signal">
+          <p>Could not start an agent session: {sessionError.message}</p>
+          {onRetrySession ? (
+            <button
+              type="button"
+              onClick={onRetrySession}
+              disabled={sessionPending}
+              className="mt-2 inline-flex items-center gap-2 rounded-md border border-signal/40 px-3 py-1.5 text-xs font-medium hover:bg-white disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {sessionPending ? <LoaderCircle size={14} className="animate-spin" /> : null}
+              Retry session
+            </button>
+          ) : null}
+        </div>
       ) : (
         <>
           <div className="mt-4 grid max-h-72 gap-2 overflow-y-auto">

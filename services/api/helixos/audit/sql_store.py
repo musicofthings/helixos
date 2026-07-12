@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+import random
+import time
+
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError, OperationalError
 
 from helixos.audit.hash_chain import canonical_payload, compute_event_hash, verify_chain
 from helixos.audit.models import AuditEventRecord
@@ -10,6 +14,14 @@ from helixos.audit.orm import AuditEventORM
 from helixos.audit.schemas import AuditChainVerification, AuditEvent
 from helixos.auth.schemas import Actor
 from helixos.db.session import session_scope
+
+# SQLite serializes writes, so bursts of concurrent audit appends contend on
+# both the write lock and the (organization_id, sequence_number) unique index.
+# Retry with exponential backoff + jitter so colliding writers desynchronize
+# instead of lockstepping through their attempts.
+_APPEND_MAX_ATTEMPTS = 12
+_APPEND_BACKOFF_BASE_SECONDS = 0.01
+_APPEND_BACKOFF_MAX_SECONDS = 0.25
 
 
 class SqlAuditStore:
@@ -25,17 +37,55 @@ class SqlAuditStore:
         resource_id: str | None = None,
         payload: dict[str, object] | None = None,
     ) -> AuditEventRecord:
+        # Concurrent appends for the same organization can read the same chain
+        # head and collide on (organization_id, sequence_number). The unique
+        # constraint turns that into an IntegrityError; a busy SQLite writer
+        # surfaces as OperationalError. Both are transient — retry re-reads the
+        # head and recomputes the hash.
+        last_error: Exception | None = None
+        for attempt in range(_APPEND_MAX_ATTEMPTS):
+            try:
+                return self._append_once(
+                    organization_id=organization_id,
+                    actor_subject=actor_subject,
+                    event_type=event_type,
+                    resource_type=resource_type,
+                    resource_id=resource_id,
+                    payload=dict(payload or {}),
+                )
+            except (IntegrityError, OperationalError) as exc:
+                last_error = exc
+                backoff = min(
+                    _APPEND_BACKOFF_BASE_SECONDS * (2**attempt),
+                    _APPEND_BACKOFF_MAX_SECONDS,
+                )
+                time.sleep(random.uniform(0, backoff))
+                continue
+        raise RuntimeError("Failed to append audit event after retries") from last_error
+
+    def _append_once(
+        self,
+        *,
+        organization_id: str,
+        actor_subject: str,
+        event_type: str,
+        resource_type: str | None,
+        resource_id: str | None,
+        payload: dict[str, object],
+    ) -> AuditEventRecord:
         event = AuditEventRecord.create(
             organization_id=organization_id,
             actor_subject=actor_subject,
             event_type=event_type,
             resource_type=resource_type,
             resource_id=resource_id,
-            payload=dict(payload or {}),
+            payload=payload,
         )
 
         with session_scope() as session:
-            previous_hash, sequence_number = self._next_chain_state(session, organization_id)
+            previous_hash, sequence_number = self._next_chain_state(
+                session, organization_id
+            )
             event_hash = compute_event_hash(
                 id=event.id,
                 organization_id=event.organization_id,
@@ -82,13 +132,17 @@ class SqlAuditStore:
                 payload_digest=row.payload_digest,
             )
 
-    def list_for_actor(self, actor: Actor, organization_id: str | None = None) -> list[AuditEvent]:
+    def list_for_actor(
+        self, actor: Actor, organization_id: str | None = None, limit: int = 50
+    ) -> list[AuditEvent]:
         visible_orgs = set(actor.organization_ids)
         with session_scope() as session:
-            query = select(AuditEventORM).where(AuditEventORM.organization_id.in_(visible_orgs))
+            query = select(AuditEventORM).where(
+                AuditEventORM.organization_id.in_(visible_orgs)
+            )
             if organization_id is not None:
                 query = query.where(AuditEventORM.organization_id == organization_id)
-            query = query.order_by(AuditEventORM.created_at.desc())
+            query = query.order_by(AuditEventORM.created_at.desc()).limit(limit)
             rows = session.scalars(query).all()
             return [self._to_schema(row) for row in rows]
 

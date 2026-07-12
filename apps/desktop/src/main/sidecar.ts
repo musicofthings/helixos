@@ -10,6 +10,7 @@ export type SidecarStartOptions = {
   preferredPort: number;
   pythonExecutable: string;
   mcpBridgeUrl?: string;
+  mcpBridgeToken?: string;
   sidecarEnv?: NodeJS.ProcessEnv;
   onStatus?: (status: SidecarStatus, message?: string) => void;
   onLog?: (line: string) => void;
@@ -36,7 +37,8 @@ export class ApiSidecar {
     const sidecarEnv = {
       ...(options.sidecarEnv ?? process.env),
       HELIX_API_PORT: String(port),
-      HELIX_MCP_BRIDGE_URL: options.mcpBridgeUrl ?? ""
+      HELIX_MCP_BRIDGE_URL: options.mcpBridgeUrl ?? "",
+      HELIX_MCP_BRIDGE_TOKEN: options.mcpBridgeToken ?? ""
     };
 
     if (options.apiBinary) {

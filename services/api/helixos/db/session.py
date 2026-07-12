@@ -22,9 +22,15 @@ def get_engine(settings: DatabaseSettings | None = None) -> Engine | None:
         return None
 
     if _engine is None:
-        connect_args = {"check_same_thread": False} if resolved.url.startswith("sqlite") else {}
+        connect_args: dict[str, object] = {}
+        if resolved.url.startswith("sqlite"):
+            # Allow cross-thread use and wait on the write lock instead of
+            # failing immediately when concurrent requests append audit rows.
+            connect_args = {"check_same_thread": False, "timeout": 30}
         _engine = create_engine(resolved.url, future=True, connect_args=connect_args)
-        _session_factory = sessionmaker(bind=_engine, autoflush=False, autocommit=False, future=True)
+        _session_factory = sessionmaker(
+            bind=_engine, autoflush=False, autocommit=False, future=True
+        )
     return _engine
 
 
@@ -40,6 +46,7 @@ def reset_engine() -> None:
 def init_db(settings: DatabaseSettings | None = None) -> None:
     """Create database tables when using SQL storage."""
     from helixos.audit.orm import AuditEventORM  # noqa: F401
+    from helixos.eln import orm as eln_orm  # noqa: F401
 
     engine = get_engine(settings)
     if engine is not None:

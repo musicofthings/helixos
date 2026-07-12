@@ -7,12 +7,23 @@ import type {
   ConnectorJobRequest,
   ConnectorJobResult,
   ConnectorManifest,
+  Dataset,
+  DatasetCreate,
   Experiment,
   ExperimentCreate,
-  ExperimentStatus,
   ExperimentStatusUpdate,
+  ExperimentVersion,
+  ExperimentVersionCreate,
   Organization,
-  Sequence
+  Project,
+  ProjectCreate,
+  ProjectUpdate,
+  Sample,
+  SampleCreate,
+  SampleUpdate,
+  Sequence,
+  Workspace,
+  WorkspaceCreate
 } from "@helixos/types";
 
 import { HelixOSApiError } from "./errors";
@@ -85,8 +96,50 @@ export class HelixOSClient {
     return this.request("/api/v1/organizations");
   }
 
-  listExperiments(): Promise<Experiment[]> {
-    return this.request("/api/v1/experiments");
+  // --- Workspaces --------------------------------------------------------- //
+  listWorkspaces(organizationId?: string): Promise<Workspace[]> {
+    const query = organizationId ? `?organization_id=${encodeURIComponent(organizationId)}` : "";
+    return this.request(`/api/v1/workspaces${query}`);
+  }
+
+  createWorkspace(payload: WorkspaceCreate): Promise<Workspace> {
+    return this.request("/api/v1/workspaces", { method: "POST", body: JSON.stringify(payload) });
+  }
+
+  seedDefaultWorkspaces(organizationId: string): Promise<Workspace[]> {
+    return this.request("/api/v1/workspaces/seed-defaults", {
+      method: "POST",
+      body: JSON.stringify({ organization_id: organizationId })
+    });
+  }
+
+  // --- Projects ----------------------------------------------------------- //
+  listProjects(params?: { organizationId?: string; workspaceId?: string }): Promise<Project[]> {
+    const search = new URLSearchParams();
+    if (params?.organizationId) search.set("organization_id", params.organizationId);
+    if (params?.workspaceId) search.set("workspace_id", params.workspaceId);
+    const query = search.toString();
+    return this.request(`/api/v1/projects${query ? `?${query}` : ""}`);
+  }
+
+  createProject(payload: ProjectCreate): Promise<Project> {
+    return this.request("/api/v1/projects", { method: "POST", body: JSON.stringify(payload) });
+  }
+
+  updateProject(projectId: string, payload: ProjectUpdate): Promise<Project> {
+    return this.request(`/api/v1/projects/${encodeURIComponent(projectId)}`, {
+      method: "PATCH",
+      body: JSON.stringify(payload)
+    });
+  }
+
+  // --- Experiments + versions -------------------------------------------- //
+  listExperiments(params?: { organizationId?: string; projectId?: string }): Promise<Experiment[]> {
+    const search = new URLSearchParams();
+    if (params?.organizationId) search.set("organization_id", params.organizationId);
+    if (params?.projectId) search.set("project_id", params.projectId);
+    const query = search.toString();
+    return this.request(`/api/v1/experiments${query ? `?${query}` : ""}`);
   }
 
   createExperiment(payload: ExperimentCreate): Promise<Experiment> {
@@ -96,11 +149,55 @@ export class HelixOSClient {
     });
   }
 
-  updateExperimentStatus(experimentId: string, payload: ExperimentStatusUpdate): Promise<Experiment> {
-    return this.request(`/api/v1/experiments/${encodeURIComponent(experimentId)}`, {
+  getExperiment(experimentId: string): Promise<Experiment> {
+    return this.request(`/api/v1/experiments/${encodeURIComponent(experimentId)}`);
+  }
+
+  listExperimentVersions(experimentId: string): Promise<ExperimentVersion[]> {
+    return this.request(`/api/v1/experiments/${encodeURIComponent(experimentId)}/versions`);
+  }
+
+  commitExperimentVersion(experimentId: string, payload: ExperimentVersionCreate): Promise<ExperimentVersion> {
+    return this.request(`/api/v1/experiments/${encodeURIComponent(experimentId)}/versions`, {
+      method: "POST",
+      body: JSON.stringify(payload)
+    });
+  }
+
+  updateVersionStatus(
+    experimentId: string,
+    versionId: string,
+    payload: ExperimentStatusUpdate
+  ): Promise<ExperimentVersion> {
+    return this.request(
+      `/api/v1/experiments/${encodeURIComponent(experimentId)}/versions/${encodeURIComponent(versionId)}`,
+      { method: "PATCH", body: JSON.stringify(payload) }
+    );
+  }
+
+  // --- Samples ------------------------------------------------------------ //
+  listSamples(experimentId: string): Promise<Sample[]> {
+    return this.request(`/api/v1/experiments/${encodeURIComponent(experimentId)}/samples`);
+  }
+
+  createSample(payload: SampleCreate): Promise<Sample> {
+    return this.request("/api/v1/samples", { method: "POST", body: JSON.stringify(payload) });
+  }
+
+  updateSample(sampleId: string, payload: SampleUpdate): Promise<Sample> {
+    return this.request(`/api/v1/samples/${encodeURIComponent(sampleId)}`, {
       method: "PATCH",
       body: JSON.stringify(payload)
     });
+  }
+
+  // --- Datasets ----------------------------------------------------------- //
+  listDatasets(sampleId: string): Promise<Dataset[]> {
+    return this.request(`/api/v1/samples/${encodeURIComponent(sampleId)}/datasets`);
+  }
+
+  createDataset(payload: DatasetCreate): Promise<Dataset> {
+    return this.request("/api/v1/datasets", { method: "POST", body: JSON.stringify(payload) });
   }
 
   getSequence(sequenceId: string): Promise<Sequence> {
@@ -115,6 +212,7 @@ export class HelixOSClient {
     return this.request("/api/v1/mcp/jobs", {
       method: "POST",
       body: JSON.stringify({
+        organization_id: payload.organization_id,
         connector_id: payload.connector_id,
         tool: payload.tool,
         arguments: payload.arguments ?? {}

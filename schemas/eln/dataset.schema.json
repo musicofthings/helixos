@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://helixos.dev/schemas/eln/dataset.schema.json",
+  "title": "Dataset",
+  "type": "object",
+  "required": ["id", "organization_id", "sample_id", "name", "dataset_type", "content", "created_at", "updated_at"],
+  "properties": {
+    "id": { "type": "string" },
+    "organization_id": { "type": "string" },
+    "sample_id": { "type": "string" },
+    "name": { "type": "string", "minLength": 1 },
+    "dataset_type": {
+      "type": "string",
+      "enum": ["dna_sequence", "rna_sequence", "protein_sequence", "measurement", "file", "other"]
+    },
+    "sequence_id": { "type": ["string", "null"] },
+    "content": { "type": "object" },
+    "created_at": { "type": "string", "format": "date-time" },
+    "updated_at": { "type": "string", "format": "date-time" }
+  }
+}

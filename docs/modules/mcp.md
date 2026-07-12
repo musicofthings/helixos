@@ -54,6 +54,7 @@ Example job request:
 
 ```json
 {
+  "organization_id": "org_demo",
   "connector_id": "biopython-local",
   "tool": "analyze_sequence",
   "arguments": {
@@ -62,11 +63,13 @@ Example job request:
 }
 ```
 
-Requires `HELIX_MCP_BRIDGE_URL` (set automatically by the desktop sidecar).
+`organization_id` is required and validated against the caller's tenant access; jobs are audited under that organization.
+
+Requires `HELIX_MCP_BRIDGE_URL` (set automatically by the desktop sidecar). The API authenticates to the bridge with `HELIX_MCP_BRIDGE_TOKEN` via the `x-helix-bridge-token` header; the desktop generates this secret at launch and injects it into both the bridge and the sidecar.
 
 ## Security Rules
 
-Connectors must declare scopes before execution. Jobs with file, network, or compute access must be sandboxed and auditable. The bridge listens on `127.0.0.1` only.
+Connectors must declare scopes before execution. Jobs with file, network, or compute access must be sandboxed and auditable. The bridge listens on `127.0.0.1` only and requires a per-launch shared secret (`x-helix-bridge-token`) so other local processes cannot invoke connectors. `GET /health` is the only unauthenticated bridge route.
 
 ## Audit And Permissions
 

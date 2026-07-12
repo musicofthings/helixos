@@ -2,6 +2,7 @@
 
 import base64
 import json
+import os
 from typing import Any
 
 from fastapi import Depends
@@ -21,12 +22,24 @@ DEMO_TOKENS: dict[str, Actor] = {
     "demo-admin-token": Actor(
         subject="user_demo_admin",
         organization_ids=["org_demo", "org_qc"],
-        permissions=["organizations:read", "experiments:write", "sequences:read", "mcp:read", "ai:run"],
+        permissions=[
+            "organizations:read",
+            "experiments:write",
+            "sequences:read",
+            "mcp:read",
+            "ai:run",
+        ],
     ),
     "org-demo-token": Actor(
         subject="user_demo_scientist",
         organization_ids=["org_demo"],
-        permissions=["organizations:read", "experiments:write", "sequences:read", "mcp:read", "ai:run"],
+        permissions=[
+            "organizations:read",
+            "experiments:write",
+            "sequences:read",
+            "mcp:read",
+            "ai:run",
+        ],
     ),
 }
 
@@ -37,7 +50,9 @@ class OrganizationService:
     def list_for_actor(self, actor: Actor) -> list[Organization]:
         """List organizations visible to an authenticated actor."""
         visible = set(actor.organization_ids)
-        return [organization for organization in ORGANIZATIONS if organization.id in visible]
+        return [
+            organization for organization in ORGANIZATIONS if organization.id in visible
+        ]
 
     def require_access(self, actor: Actor, organization_id: str) -> None:
         """Raise when an actor cannot access a tenant."""
@@ -50,13 +65,18 @@ class OrganizationService:
             )
 
 
-def _decode_unverified_jwt_payload(token: str) -> dict[str, Any] | None:
-    """Decode a JWT-like payload without signature verification for local dev.
+def _unverified_jwt_enabled() -> bool:
+    """Whether unverified JWT decoding is explicitly enabled for local dev.
 
-    Production integrations should replace this with the configured OIDC/JWKS
-    verifier. This keeps the starter kit's bearer-token contract testable
-    without adding provider-specific dependencies.
+    Fails closed: unless HELIX_ALLOW_UNVERIFIED_JWT=1 is set, only the
+    documented demo tokens are accepted. Production deployments must leave
+    this unset and use a real OIDC/JWKS verifier instead.
     """
+    return os.getenv("HELIX_ALLOW_UNVERIFIED_JWT") == "1"
+
+
+def _decode_unverified_jwt_payload(token: str) -> dict[str, Any] | None:
+    """Decode a JWT-like payload without signature verification for local dev."""
     parts = token.split(".")
     if len(parts) != 3:
         return None
@@ -76,6 +96,9 @@ def actor_from_token(token: str) -> Actor | None:
     if token in DEMO_TOKENS:
         return DEMO_TOKENS[token]
 
+    if not _unverified_jwt_enabled():
+        return None
+
     payload = _decode_unverified_jwt_payload(token)
     if payload is None:
         return None
@@ -93,14 +116,20 @@ def actor_from_token(token: str) -> Actor | None:
     )
 
 
-def get_current_actor(credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme)) -> Actor:
+def get_current_actor(
+    credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
+) -> Actor:
     """Extract the authenticated actor from a bearer token."""
     if credentials is None:
-        raise api_error(status_code=401, code="unauthorized", message="Bearer token is required")
+        raise api_error(
+            status_code=401, code="unauthorized", message="Bearer token is required"
+        )
 
     actor = actor_from_token(credentials.credentials)
     if actor is None:
-        raise api_error(status_code=401, code="unauthorized", message="Bearer token is invalid")
+        raise api_error(
+            status_code=401, code="unauthorized", message="Bearer token is invalid"
+        )
     return actor
 
 

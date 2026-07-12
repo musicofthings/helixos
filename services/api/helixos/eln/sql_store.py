@@ -1,0 +1,503 @@
+"""SQL-backed ELN store for Postgres and SQLite."""
+
+from __future__ import annotations
+
+import random
+import time
+from collections.abc import Callable
+from collections.abc import Sequence
+from datetime import datetime, timezone
+from typing import TypeVar
+
+from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError, OperationalError
+
+from helixos.db.session import session_scope
+from helixos.eln.orm import (
+    DatasetORM,
+    ExperimentORM,
+    ExperimentVersionORM,
+    ProjectORM,
+    SampleORM,
+    WorkspaceORM,
+)
+from helixos.eln.schemas import (
+    Dataset,
+    Experiment,
+    ExperimentBlock,
+    ExperimentVersion,
+    Project,
+    Sample,
+    Workspace,
+)
+from helixos.eln.stores import PlateFullError, WellOccupiedError
+
+
+T = TypeVar("T")
+
+# Concurrent version commits for one experiment can read the same max version
+# number and collide on uq_eln_version_experiment_number; a busy SQLite writer
+# surfaces as OperationalError. Both are transient — retry re-reads the max.
+_MAX_ATTEMPTS = 12
+_BACKOFF_BASE_SECONDS = 0.01
+_BACKOFF_MAX_SECONDS = 0.25
+
+
+def _retry_on_write_conflict(operation: Callable[[], T]) -> T:
+    last_error: Exception | None = None
+    for attempt in range(_MAX_ATTEMPTS):
+        try:
+            return operation()
+        except (IntegrityError, OperationalError) as exc:
+            last_error = exc
+            backoff = min(_BACKOFF_BASE_SECONDS * (2**attempt), _BACKOFF_MAX_SECONDS)
+            time.sleep(random.uniform(0, backoff))
+    raise RuntimeError(
+        "Failed to commit experiment version after retries"
+    ) from last_error
+
+
+def _now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _blocks_to_json(blocks: list[ExperimentBlock]) -> list[dict]:
+    return [block.model_dump() for block in blocks]
+
+
+def _blocks_from_json(raw: list | None) -> list[ExperimentBlock]:
+    return [ExperimentBlock.model_validate(item) for item in (raw or [])]
+
+
+class SqlElnStore:
+    """Persist the ELN hierarchy in Postgres or SQLite."""
+
+    # Workspaces
+    def create_workspace(self, workspace: Workspace) -> Workspace:
+        with session_scope() as session:
+            session.add(
+                WorkspaceORM(
+                    id=workspace.id,
+                    organization_id=workspace.organization_id,
+                    name=workspace.name,
+                    category=workspace.category.value,
+                    description=workspace.description,
+                    is_default=workspace.is_default,
+                    created_at=workspace.created_at,
+                    updated_at=workspace.updated_at,
+                )
+            )
+        return workspace
+
+    def get_workspace(self, workspace_id: str) -> Workspace | None:
+        with session_scope() as session:
+            row = session.get(WorkspaceORM, workspace_id)
+            return _to_workspace(row) if row else None
+
+    def list_workspaces(self, organization_ids: Sequence[str]) -> list[Workspace]:
+        with session_scope() as session:
+            rows = session.scalars(
+                select(WorkspaceORM)
+                .where(WorkspaceORM.organization_id.in_(list(organization_ids)))
+                .order_by(WorkspaceORM.created_at.asc())
+            ).all()
+            return [_to_workspace(row) for row in rows]
+
+    def count_workspaces(self, organization_id: str) -> int:
+        with session_scope() as session:
+            return int(
+                session.scalar(
+                    select(func.count())
+                    .select_from(WorkspaceORM)
+                    .where(WorkspaceORM.organization_id == organization_id)
+                )
+                or 0
+            )
+
+    # Projects
+    def create_project(self, project: Project) -> Project:
+        with session_scope() as session:
+            session.add(
+                ProjectORM(
+                    id=project.id,
+                    organization_id=project.organization_id,
+                    workspace_id=project.workspace_id,
+                    name=project.name,
+                    description=project.description,
+                    status=project.status.value,
+                    created_at=project.created_at,
+                    updated_at=project.updated_at,
+                )
+            )
+        return project
+
+    def get_project(self, project_id: str) -> Project | None:
+        with session_scope() as session:
+            row = session.get(ProjectORM, project_id)
+            return _to_project(row) if row else None
+
+    def list_projects(
+        self, organization_ids: Sequence[str], workspace_id: str | None = None
+    ) -> list[Project]:
+        with session_scope() as session:
+            query = select(ProjectORM).where(
+                ProjectORM.organization_id.in_(list(organization_ids))
+            )
+            if workspace_id is not None:
+                query = query.where(ProjectORM.workspace_id == workspace_id)
+            rows = session.scalars(query.order_by(ProjectORM.created_at.asc())).all()
+            return [_to_project(row) for row in rows]
+
+    def update_project(self, project: Project) -> Project:
+        with session_scope() as session:
+            row = session.get(ProjectORM, project.id)
+            if row is not None:
+                row.name = project.name
+                row.description = project.description
+                row.status = project.status.value
+                row.updated_at = project.updated_at
+        return project
+
+    # Experiments
+    def create_experiment_with_version(
+        self, experiment: Experiment, version: ExperimentVersion
+    ) -> Experiment:
+        # One transaction, so an experiment can never be persisted without the
+        # v1 its head_version_id points at.
+        with session_scope() as session:
+            session.add(
+                ExperimentORM(
+                    id=experiment.id,
+                    organization_id=experiment.organization_id,
+                    project_id=experiment.project_id,
+                    name=experiment.name,
+                    description=experiment.description,
+                    head_version_id=experiment.head_version_id,
+                    version_count=experiment.version_count,
+                    created_at=experiment.created_at,
+                    updated_at=experiment.updated_at,
+                )
+            )
+            session.flush()
+            session.add(_version_row(version))
+        return experiment
+
+    def get_experiment(self, experiment_id: str) -> Experiment | None:
+        with session_scope() as session:
+            row = session.get(ExperimentORM, experiment_id)
+            return _to_experiment(row) if row else None
+
+    def list_experiments(
+        self, organization_ids: Sequence[str], project_id: str | None = None
+    ) -> list[Experiment]:
+        with session_scope() as session:
+            query = select(ExperimentORM).where(
+                ExperimentORM.organization_id.in_(list(organization_ids))
+            )
+            if project_id is not None:
+                query = query.where(ExperimentORM.project_id == project_id)
+            rows = session.scalars(query.order_by(ExperimentORM.created_at.asc())).all()
+            return [_to_experiment(row) for row in rows]
+
+    def update_experiment(self, experiment: Experiment) -> Experiment:
+        with session_scope() as session:
+            row = session.get(ExperimentORM, experiment.id)
+            if row is not None:
+                row.project_id = experiment.project_id
+                row.name = experiment.name
+                row.description = experiment.description
+                row.head_version_id = experiment.head_version_id
+                row.version_count = experiment.version_count
+                row.updated_at = experiment.updated_at
+        return experiment
+
+    # Versions
+    def append_version(self, version: ExperimentVersion) -> ExperimentVersion:
+        def _insert() -> ExperimentVersion:
+            with session_scope() as session:
+                next_number = (
+                    int(
+                        session.scalar(
+                            select(
+                                func.coalesce(
+                                    func.max(ExperimentVersionORM.version_number), 0
+                                )
+                            ).where(
+                                ExperimentVersionORM.experiment_id
+                                == version.experiment_id
+                            )
+                        )
+                        or 0
+                    )
+                    + 1
+                )
+                stored = version.model_copy(update={"version_number": next_number})
+                session.add(_version_row(stored))
+                session.flush()
+
+                experiment = session.get(ExperimentORM, stored.experiment_id)
+                if experiment is not None:
+                    experiment.head_version_id = stored.id
+                    experiment.version_count = next_number
+                    experiment.updated_at = _now()
+                return stored
+
+        # The unique constraint on (experiment_id, version_number) is what makes
+        # the racing writer lose rather than duplicate; retry re-reads the max.
+        return _retry_on_write_conflict(_insert)
+
+    def get_version(self, version_id: str) -> ExperimentVersion | None:
+        with session_scope() as session:
+            row = session.get(ExperimentVersionORM, version_id)
+            return _to_version(row) if row else None
+
+    def list_versions(self, experiment_id: str) -> list[ExperimentVersion]:
+        with session_scope() as session:
+            rows = session.scalars(
+                select(ExperimentVersionORM)
+                .where(ExperimentVersionORM.experiment_id == experiment_id)
+                .order_by(ExperimentVersionORM.version_number.asc())
+            ).all()
+            return [_to_version(row) for row in rows]
+
+    def update_version(self, version: ExperimentVersion) -> ExperimentVersion:
+        with session_scope() as session:
+            row = session.get(ExperimentVersionORM, version.id)
+            if row is not None:
+                row.status = version.status.value
+        return version
+
+    # Samples
+    def create_sample(self, sample: Sample, max_samples: int) -> Sample:
+        def _insert() -> Sample:
+            with session_scope() as session:
+                if sample.well_position is not None:
+                    taken = session.scalar(
+                        select(SampleORM.id)
+                        .where(
+                            SampleORM.experiment_id == sample.experiment_id,
+                            SampleORM.well_position == sample.well_position,
+                        )
+                        .limit(1)
+                    )
+                    if taken is not None:
+                        raise WellOccupiedError
+
+                session.add(
+                    SampleORM(
+                        id=sample.id,
+                        organization_id=sample.organization_id,
+                        experiment_id=sample.experiment_id,
+                        name=sample.name,
+                        sample_type=sample.sample_type.value,
+                        well_position=sample.well_position,
+                        status=sample.status.value,
+                        sample_metadata=sample.metadata,
+                        created_at=sample.created_at,
+                        updated_at=sample.updated_at,
+                    )
+                )
+                session.flush()
+
+                # Count *after* the insert so our own row is included and any
+                # concurrently-committed row is visible. Counting first would let
+                # two writers both see 95 and land a 97th sample on the plate.
+                # Over the cap means we lost the race: roll back and report it.
+                total = int(
+                    session.scalar(
+                        select(func.count())
+                        .select_from(SampleORM)
+                        .where(SampleORM.experiment_id == sample.experiment_id)
+                    )
+                    or 0
+                )
+                if total > max_samples:
+                    raise PlateFullError
+                return sample
+
+        # A racing writer that beat us to the well trips the unique constraint;
+        # the retry re-reads and turns it into a clean WellOccupiedError.
+        return _retry_on_write_conflict(_insert)
+
+    def get_sample(self, sample_id: str) -> Sample | None:
+        with session_scope() as session:
+            row = session.get(SampleORM, sample_id)
+            return _to_sample(row) if row else None
+
+    def list_samples(self, experiment_id: str) -> list[Sample]:
+        with session_scope() as session:
+            rows = session.scalars(
+                select(SampleORM)
+                .where(SampleORM.experiment_id == experiment_id)
+                .order_by(SampleORM.created_at.asc())
+            ).all()
+            return [_to_sample(row) for row in rows]
+
+    def count_samples(self, experiment_id: str) -> int:
+        with session_scope() as session:
+            return int(
+                session.scalar(
+                    select(func.count())
+                    .select_from(SampleORM)
+                    .where(SampleORM.experiment_id == experiment_id)
+                )
+                or 0
+            )
+
+    def well_occupied(
+        self,
+        experiment_id: str,
+        well_position: str,
+        exclude_sample_id: str | None = None,
+    ) -> bool:
+        with session_scope() as session:
+            query = select(SampleORM.id).where(
+                SampleORM.experiment_id == experiment_id,
+                SampleORM.well_position == well_position,
+            )
+            if exclude_sample_id is not None:
+                query = query.where(SampleORM.id != exclude_sample_id)
+            return session.scalar(query.limit(1)) is not None
+
+    def update_sample(self, sample: Sample) -> Sample:
+        with session_scope() as session:
+            row = session.get(SampleORM, sample.id)
+            if row is not None:
+                row.name = sample.name
+                row.sample_type = sample.sample_type.value
+                row.well_position = sample.well_position
+                row.status = sample.status.value
+                row.sample_metadata = sample.metadata
+                row.updated_at = sample.updated_at
+        return sample
+
+    # Datasets
+    def create_dataset(self, dataset: Dataset) -> Dataset:
+        with session_scope() as session:
+            session.add(
+                DatasetORM(
+                    id=dataset.id,
+                    organization_id=dataset.organization_id,
+                    sample_id=dataset.sample_id,
+                    name=dataset.name,
+                    dataset_type=dataset.dataset_type.value,
+                    sequence_id=dataset.sequence_id,
+                    content=dataset.content,
+                    created_at=dataset.created_at,
+                    updated_at=dataset.updated_at,
+                )
+            )
+        return dataset
+
+    def get_dataset(self, dataset_id: str) -> Dataset | None:
+        with session_scope() as session:
+            row = session.get(DatasetORM, dataset_id)
+            return _to_dataset(row) if row else None
+
+    def list_datasets(self, sample_id: str) -> list[Dataset]:
+        with session_scope() as session:
+            rows = session.scalars(
+                select(DatasetORM)
+                .where(DatasetORM.sample_id == sample_id)
+                .order_by(DatasetORM.created_at.asc())
+            ).all()
+            return [_to_dataset(row) for row in rows]
+
+
+def _version_row(version: ExperimentVersion) -> ExperimentVersionORM:
+    return ExperimentVersionORM(
+        id=version.id,
+        experiment_id=version.experiment_id,
+        organization_id=version.organization_id,
+        version_number=version.version_number,
+        parent_version_id=version.parent_version_id,
+        message=version.message,
+        status=version.status.value,
+        blocks=_blocks_to_json(version.blocks),
+        author_subject=version.author_subject,
+        created_at=version.created_at,
+    )
+
+
+def _to_workspace(row: WorkspaceORM) -> Workspace:
+    return Workspace(
+        id=row.id,
+        organization_id=row.organization_id,
+        name=row.name,
+        category=row.category,
+        description=row.description,
+        is_default=row.is_default,
+        created_at=row.created_at,
+        updated_at=row.updated_at,
+    )
+
+
+def _to_project(row: ProjectORM) -> Project:
+    return Project(
+        id=row.id,
+        organization_id=row.organization_id,
+        workspace_id=row.workspace_id,
+        name=row.name,
+        description=row.description,
+        status=row.status,
+        created_at=row.created_at,
+        updated_at=row.updated_at,
+    )
+
+
+def _to_experiment(row: ExperimentORM) -> Experiment:
+    return Experiment(
+        id=row.id,
+        organization_id=row.organization_id,
+        project_id=row.project_id,
+        name=row.name,
+        description=row.description,
+        head_version_id=row.head_version_id,
+        version_count=row.version_count,
+        created_at=row.created_at,
+        updated_at=row.updated_at,
+    )
+
+
+def _to_version(row: ExperimentVersionORM) -> ExperimentVersion:
+    return ExperimentVersion(
+        id=row.id,
+        experiment_id=row.experiment_id,
+        organization_id=row.organization_id,
+        version_number=row.version_number,
+        parent_version_id=row.parent_version_id,
+        message=row.message,
+        status=row.status,
+        blocks=_blocks_from_json(row.blocks),
+        author_subject=row.author_subject,
+        created_at=row.created_at,
+    )
+
+
+def _to_sample(row: SampleORM) -> Sample:
+    return Sample(
+        id=row.id,
+        organization_id=row.organization_id,
+        experiment_id=row.experiment_id,
+        name=row.name,
+        sample_type=row.sample_type,
+        well_position=row.well_position,
+        status=row.status,
+        metadata=row.sample_metadata,
+        created_at=row.created_at,
+        updated_at=row.updated_at,
+    )
+
+
+def _to_dataset(row: DatasetORM) -> Dataset:
+    return Dataset(
+        id=row.id,
+        organization_id=row.organization_id,
+        sample_id=row.sample_id,
+        name=row.name,
+        dataset_type=row.dataset_type,
+        sequence_id=row.sequence_id,
+        content=row.content,
+        created_at=row.created_at,
+        updated_at=row.updated_at,
+    )

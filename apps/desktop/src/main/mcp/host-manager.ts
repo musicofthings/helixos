@@ -7,7 +7,10 @@ type JsonObject = Record<string, unknown>;
 type PendingRequest = {
   resolve: (value: JsonObject) => void;
   reject: (error: Error) => void;
+  timer: NodeJS.Timeout;
 };
+
+const REQUEST_TIMEOUT_MS = 30_000;
 
 export type StdioConnectorDefinition = {
   id: string;
@@ -63,6 +66,7 @@ export class StdioConnectorHost {
           return;
         }
         this.pending.delete(requestId);
+        clearTimeout(pending.timer);
         if (payload.error) {
           pending.reject(new Error(String((payload.error as JsonObject).message ?? "Connector error")));
           return;
@@ -82,6 +86,7 @@ export class StdioConnectorHost {
 
     child.on("exit", (code) => {
       for (const [, pending] of this.pending) {
+        clearTimeout(pending.timer);
         pending.reject(new Error(`Connector exited with code ${code ?? "unknown"}`));
       }
       this.pending.clear();
@@ -133,10 +138,19 @@ export class StdioConnectorHost {
     const payload = JSON.stringify({ id: requestId, method, params });
 
     return new Promise<JsonObject>((resolve, reject) => {
-      this.pending.set(requestId, { resolve, reject });
+      const timer = setTimeout(() => {
+        this.pending.delete(requestId);
+        reject(new Error(`Connector ${this.definition.id} request timed out after 30s`));
+      }, REQUEST_TIMEOUT_MS);
+
+      this.pending.set(requestId, { resolve, reject, timer });
       this.process?.stdin?.write(`${payload}\n`, (error) => {
         if (error) {
-          this.pending.delete(requestId);
+          const pending = this.pending.get(requestId);
+          if (pending) {
+            clearTimeout(pending.timer);
+            this.pending.delete(requestId);
+          }
           reject(error);
         }
       });

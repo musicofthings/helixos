@@ -19,6 +19,7 @@ class ConnectorManifest(BaseModel):
 class ConnectorJobRequest(BaseModel):
     """Payload for invoking a connector tool."""
 
+    organization_id: str
     connector_id: str
     tool: str
     arguments: dict[str, Any] = Field(default_factory=dict)

@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://helixos.dev/schemas/eln/sample.schema.json",
+  "title": "Sample",
+  "type": "object",
+  "required": ["id", "organization_id", "experiment_id", "name", "sample_type", "status", "metadata", "created_at", "updated_at"],
+  "properties": {
+    "id": { "type": "string" },
+    "organization_id": { "type": "string" },
+    "experiment_id": { "type": "string" },
+    "name": { "type": "string", "minLength": 1 },
+    "sample_type": {
+      "type": "string",
+      "enum": ["dna", "rna", "protein", "cell", "tissue", "reagent", "other"]
+    },
+    "well_position": {
+      "type": ["string", "null"],
+      "description": "96-well plate coordinate A1-H12",
+      "pattern": "^[A-H](1[0-2]|[1-9])$"
+    },
+    "status": { "type": "string", "enum": ["planned", "active", "consumed", "archived"] },
+    "metadata": { "type": "object" },
+    "created_at": { "type": "string", "format": "date-time" },
+    "updated_at": { "type": "string", "format": "date-time" }
+  }
+}

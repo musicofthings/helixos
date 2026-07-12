@@ -12,6 +12,7 @@ from helixos.db.session import init_db
 from helixos.db.settings import get_database_settings
 from helixos.modules.router import router as modules_router
 from helixos.eln.router import router as eln_router
+from helixos.eln.service import build_eln_store, eln_service
 from helixos.mcp.router import router as mcp_router
 from helixos.molecular.router import router as molecular_router
 from helixos.errors import http_exception_handler
@@ -24,6 +25,7 @@ def create_app() -> FastAPI:
         init_db(db_settings)
 
     audit_service.use_store(build_audit_store(db_settings))
+    eln_service.use_store(build_eln_store(db_settings))
 
     app = FastAPI(
         title="HelixOS API",

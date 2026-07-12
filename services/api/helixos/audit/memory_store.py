@@ -65,7 +65,9 @@ class MemoryAuditStore:
         self._sequence_by_org[organization_id] = sequence_number
         return stored
 
-    def list_for_actor(self, actor: Actor, organization_id: str | None = None) -> list[AuditEvent]:
+    def list_for_actor(
+        self, actor: Actor, organization_id: str | None = None, limit: int = 50
+    ) -> list[AuditEvent]:
         visible_orgs = set(actor.organization_ids)
         events = [
             event
@@ -74,13 +76,17 @@ class MemoryAuditStore:
             and (organization_id is None or event.organization_id == organization_id)
         ]
         events.sort(key=lambda item: item.created_at, reverse=True)
-        return [self._to_schema(event) for event in events]
+        return [self._to_schema(event) for event in events[:limit]]
 
     def verify_chain(self, organization_id: str) -> AuditChainVerification:
         events = [
             self._event_dict(event)
             for event in sorted(
-                (item for item in self._events if item.organization_id == organization_id),
+                (
+                    item
+                    for item in self._events
+                    if item.organization_id == organization_id
+                ),
                 key=lambda item: item.sequence_number,
             )
         ]
@@ -94,7 +100,9 @@ class MemoryAuditStore:
         )
 
     def _head_hash(self, organization_id: str) -> str | None:
-        org_events = [event for event in self._events if event.organization_id == organization_id]
+        org_events = [
+            event for event in self._events if event.organization_id == organization_id
+        ]
         if not org_events:
             return None
         return max(org_events, key=lambda item: item.sequence_number).event_hash

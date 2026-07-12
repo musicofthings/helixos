@@ -15,26 +15,162 @@ export interface ExperimentBlock {
   content: unknown;
 }
 
+export type WorkspaceCategory =
+  | "molecular_biology"
+  | "biochemistry"
+  | "microbiology"
+  | "genomics"
+  | "cell_biology"
+  | "custom";
+
+export interface Workspace {
+  id: string;
+  organization_id: string;
+  name: string;
+  category: WorkspaceCategory;
+  description?: string | null;
+  is_default: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface WorkspaceCreate {
+  organization_id: string;
+  name: string;
+  category?: WorkspaceCategory;
+  description?: string | null;
+}
+
+export type ProjectStatus = "active" | "archived";
+
+export interface Project {
+  id: string;
+  organization_id: string;
+  workspace_id: string;
+  name: string;
+  description?: string | null;
+  status: ProjectStatus;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ProjectCreate {
+  organization_id: string;
+  workspace_id: string;
+  name: string;
+  description?: string | null;
+}
+
+export interface ProjectUpdate {
+  name?: string;
+  description?: string | null;
+  status?: ProjectStatus;
+}
+
 export interface Experiment {
   id: string;
   organization_id: string;
-  project_id?: string;
-  title: string;
-  status: ExperimentStatus;
-  blocks: ExperimentBlock[];
+  project_id?: string | null;
+  name: string;
+  description?: string | null;
+  head_version_id?: string | null;
+  version_count: number;
   created_at: string;
   updated_at: string;
 }
 
 export interface ExperimentCreate {
   organization_id: string;
-  title: string;
-  project_id?: string;
+  project_id?: string | null;
+  name: string;
+  description?: string | null;
   blocks: ExperimentBlock[];
+}
+
+export interface ExperimentVersion {
+  id: string;
+  experiment_id: string;
+  organization_id: string;
+  version_number: number;
+  parent_version_id?: string | null;
+  message: string;
+  status: ExperimentStatus;
+  blocks: ExperimentBlock[];
+  author_subject: string;
+  created_at: string;
+}
+
+export interface ExperimentVersionCreate {
+  message: string;
+  blocks: ExperimentBlock[];
+  parent_version_id?: string | null;
 }
 
 export interface ExperimentStatusUpdate {
   status: ExperimentStatus;
+}
+
+export type SampleType = "dna" | "rna" | "protein" | "cell" | "tissue" | "reagent" | "other";
+
+export type SampleStatus = "planned" | "active" | "consumed" | "archived";
+
+export interface Sample {
+  id: string;
+  organization_id: string;
+  experiment_id: string;
+  name: string;
+  sample_type: SampleType;
+  well_position?: string | null;
+  status: SampleStatus;
+  metadata: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SampleCreate {
+  organization_id: string;
+  experiment_id: string;
+  name: string;
+  sample_type?: SampleType;
+  well_position?: string | null;
+  metadata?: Record<string, unknown>;
+}
+
+export interface SampleUpdate {
+  name?: string;
+  sample_type?: SampleType;
+  well_position?: string | null;
+  status?: SampleStatus;
+  metadata?: Record<string, unknown>;
+}
+
+export type DatasetType =
+  | "dna_sequence"
+  | "rna_sequence"
+  | "protein_sequence"
+  | "measurement"
+  | "file"
+  | "other";
+
+export interface Dataset {
+  id: string;
+  organization_id: string;
+  sample_id: string;
+  name: string;
+  dataset_type: DatasetType;
+  sequence_id?: string | null;
+  content: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface DatasetCreate {
+  organization_id: string;
+  sample_id: string;
+  name: string;
+  dataset_type?: DatasetType;
+  sequence_id?: string | null;
+  content?: Record<string, unknown>;
 }
 
 export interface Organization {
@@ -78,6 +214,7 @@ export interface ConnectorManifest {
 }
 
 export interface ConnectorJobRequest {
+  organization_id: string;
   connector_id: string;
   tool: string;
   arguments?: Record<string, unknown>;

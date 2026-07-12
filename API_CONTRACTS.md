@@ -24,6 +24,24 @@ HelixOS exposes versioned REST APIs under `/api/v1`.
 }
 ```
 
+### Error Codes
+
+| Status | Code | Meaning |
+| --- | --- | --- |
+| `401` | `unauthorized` | Missing or unrecognized bearer token |
+| `403` | `forbidden` | Actor cannot access the requested `organization_id` |
+| `404` | `not_found` | Resource missing, or outside the actor's tenant |
+| `409` | `version_locked` | Signed versions are immutable — commit a new version |
+| `409` | `plate_full` | Experiment already holds 96 samples |
+| `409` | `well_occupied` | Another sample already occupies that well |
+| `422` | `invalid_well` | `well_position` is not a valid `A1`–`H12` coordinate |
+| `422` | `invalid_update` | A `PATCH` sent an explicit `null` for a non-nullable field |
+
+`PATCH` bodies omit fields to leave them unchanged. Sending an explicit `null` clears a
+nullable field (`description`, `well_position`); sending `null` for a non-nullable field
+(a project's `name`/`status`, a sample's `name`/`sample_type`/`status`/`metadata`) is
+rejected with `422 invalid_update` rather than overwriting the record.
+
 ## Initial Endpoints
 
 | Method | Path | Purpose |
@@ -31,15 +49,34 @@ HelixOS exposes versioned REST APIs under `/api/v1`.
 | `GET` | `/health` | Service health |
 | `GET` | `/api/v1/modules` | Enabled module registry |
 | `GET` | `/api/v1/organizations` | List organizations visible to caller |
-| `POST` | `/api/v1/experiments` | Create ELN experiment draft |
-| `GET` | `/api/v1/experiments` | List experiment drafts visible to caller |
-| `PATCH` | `/api/v1/experiments/{experiment_id}` | Update experiment lifecycle status |
+| `POST` | `/api/v1/workspaces` | Create a workspace (scientific category) |
+| `GET` | `/api/v1/workspaces` | List workspaces (`organization_id` filter) |
+| `POST` | `/api/v1/workspaces/seed-defaults` | Seed default workspaces for an org (idempotent) |
+| `GET` | `/api/v1/workspaces/{workspace_id}` | Fetch a workspace |
+| `POST` | `/api/v1/projects` | Create a project within a workspace |
+| `GET` | `/api/v1/projects` | List projects (`organization_id`, `workspace_id` filters) |
+| `GET` | `/api/v1/projects/{project_id}` | Fetch a project |
+| `PATCH` | `/api/v1/projects/{project_id}` | Update project name/description/status |
+| `POST` | `/api/v1/experiments` | Create an experiment + initial draft version |
+| `GET` | `/api/v1/experiments` | List experiments (`organization_id`, `project_id` filters) |
+| `GET` | `/api/v1/experiments/{experiment_id}` | Fetch an experiment (with HEAD version pointer) |
+| `POST` | `/api/v1/experiments/{experiment_id}/versions` | Commit a new immutable version, advancing HEAD |
+| `GET` | `/api/v1/experiments/{experiment_id}/versions` | List version history |
+| `GET` | `/api/v1/experiments/{experiment_id}/versions/{version_id}` | Fetch a version |
+| `PATCH` | `/api/v1/experiments/{experiment_id}/versions/{version_id}` | Transition a version's lifecycle status |
+| `POST` | `/api/v1/samples` | Create a sample under an experiment (max 96) |
+| `GET` | `/api/v1/experiments/{experiment_id}/samples` | List samples for an experiment |
+| `GET` | `/api/v1/samples/{sample_id}` | Fetch a sample |
+| `PATCH` | `/api/v1/samples/{sample_id}` | Update a sample |
+| `POST` | `/api/v1/datasets` | Attach a dataset to a sample |
+| `GET` | `/api/v1/samples/{sample_id}/datasets` | List datasets for a sample |
+| `GET` | `/api/v1/datasets/{dataset_id}` | Fetch a dataset |
 | `GET` | `/api/v1/sequences/{sequence_id}` | Fetch sequence metadata |
 | `GET` | `/api/v1/mcp/connectors` | List MCP connectors |
 | `POST` | `/api/v1/ai/sessions` | Create agent session |
 | `POST` | `/api/v1/ai/runs` | Start agent run (SSE stream) |
 | `POST` | `/api/v1/mcp/jobs` | Dispatch connector tool via desktop MCP bridge |
-| `GET` | `/api/v1/audit/events` | List audit events visible to caller |
+| `GET` | `/api/v1/audit/events` | List audit events visible to caller (`limit` 1–500, default 50) |
 | `GET` | `/api/v1/audit/verify` | Verify organization audit hash chain |
 
 ## Authentication
@@ -51,21 +88,68 @@ Local starter tokens:
 - `demo-admin-token`: access to `org_demo` and `org_qc`.
 - `org-demo-token`: access to `org_demo`.
 
-Production deployments should replace local token resolution with signed JWT validation. The authenticated actor determines tenant visibility; clients cannot widen access by passing arbitrary `organization_id` query parameters.
+By default **only these documented demo tokens are accepted** — any other token is rejected with `401`. For local development against a mock identity provider, set `HELIX_ALLOW_UNVERIFIED_JWT=1` to also accept unsigned JWT payloads (`sub` + `organization_ids` claims). This flag must remain unset in production; deployments should replace local token resolution with signed JWT validation through the configured OIDC/JWKS provider.
 
-## Example Experiment Draft
+The authenticated actor determines tenant visibility; clients cannot widen access by passing arbitrary `organization_id` query parameters or request fields.
+
+## ELN Data Model
+
+HelixOS organizes lab work as a hierarchy, each level tenant-scoped by `organization_id`:
+
+```txt
+Workspace (category)          e.g. Molecular Biology
+  └─ Project                  e.g. Reporter plasmid program
+       └─ Experiment          the "repo" — tracks a HEAD version
+            ├─ ExperimentVersion  immutable snapshot ("commit"); new edits create a new version
+            └─ Sample          up to 96 per experiment, optional A1–H12 plate well
+                 └─ Dataset    DNA/RNA/protein sequence, measurement, or file
+```
+
+Experiments are versioned like source control: `POST /experiments/{id}/versions` creates a
+new immutable `ExperimentVersion` with a `parent_version_id` and commit `message`, and moves
+the experiment's `head_version_id` forward. Signed versions are read-only.
+
+## Example Experiment Create
+
+Creates the experiment and its first draft version (`version_number` 1).
 
 ```json
 {
   "organization_id": "org_demo",
-  "title": "Gibson assembly of reporter plasmid",
   "project_id": "proj_cloning",
+  "name": "Gibson assembly of reporter plasmid",
+  "description": "Assemble and screen the reporter construct.",
   "blocks": [
     {
       "type": "text",
       "content": "Assembly plan and expected colonies."
     }
   ]
+}
+```
+
+## Example Version Commit
+
+```json
+{
+  "message": "Add gel image and update expected band sizes",
+  "parent_version_id": "expv_...",
+  "blocks": [{ "type": "text", "content": "Band observed at ~500 bp." }]
+}
+```
+
+## Example Sample Create
+
+`well_position` is optional and validated against an 8×12 (96-well) plate; it is unique per
+experiment. Creating a 97th sample returns `409 plate_full`.
+
+```json
+{
+  "organization_id": "org_demo",
+  "experiment_id": "exp_...",
+  "name": "Colony 1",
+  "sample_type": "dna",
+  "well_position": "A1"
 }
 ```
 
@@ -81,7 +165,10 @@ Production deployments should replace local token resolution with signed JWT val
 }
 ```
 
-## Example Experiment Status Update
+## Example Version Status Update
+
+Applied to a specific experiment version via
+`PATCH /api/v1/experiments/{experiment_id}/versions/{version_id}`.
 
 ```json
 {
@@ -89,7 +176,8 @@ Production deployments should replace local token resolution with signed JWT val
 }
 ```
 
-Allowed transitions: `draft` → `in_review` → `signed`.
+Allowed transitions: `draft` ↔ `in_review` → `signed`. Signed versions are immutable
+(`409 version_locked`); amend by committing a new version instead.
 
 ## Example Sequence Response
 
