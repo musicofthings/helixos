@@ -1,4 +1,5 @@
 import { app, BrowserWindow, ipcMain, shell } from "electron";
+import { randomBytes } from "node:crypto";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -24,8 +25,9 @@ let activeApiPort = 8765;
 let activeMcpBridgePort = 8766;
 let sidecarStatus: SidecarStatusEvent["status"] = "starting";
 
+const mcpBridgeToken = randomBytes(32).toString("hex");
 const mcpHostManager = new McpHostManager();
-const mcpBridgeServer = createMcpBridgeServer(mcpHostManager);
+const mcpBridgeServer = createMcpBridgeServer(mcpHostManager, mcpBridgeToken);
 
 function getBridgeConfig(): HelixDesktopConfig {
   const config = runtimeConfig ?? loadDesktopConfig();
@@ -109,6 +111,7 @@ function buildSidecarOptions(config: DesktopRuntimeConfig): Parameters<typeof ap
     preferredPort: config.apiPort,
     pythonExecutable: config.pythonExecutable,
     mcpBridgeUrl: buildMcpBridgeUrl(activeMcpBridgePort),
+    mcpBridgeToken,
     sidecarEnv: buildSidecarEnvironment(config, buildMcpBridgeUrl(activeMcpBridgePort)),
     onStatus: (status, message) => {
       broadcastSidecarStatus({

@@ -6,7 +6,11 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from helixos.audit.hash_chain import canonical_timestamp, compute_event_hash, verify_chain
+from helixos.audit.hash_chain import (
+    canonical_timestamp,
+    compute_event_hash,
+    verify_chain,
+)
 from helixos.audit.memory_store import MemoryAuditStore
 from helixos.audit.service import AuditService, build_audit_store
 from helixos.auth.schemas import Actor
@@ -37,7 +41,9 @@ def test_memory_store_builds_valid_hash_chain() -> None:
     assert verification.head_hash is not None
 
 
-def test_sqlite_store_persists_hash_chain(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_sqlite_store_persists_hash_chain(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     db_path = tmp_path / "audit.db"
     database_url = f"sqlite:///{db_path}"
     monkeypatch.setenv("HELIX_DATABASE_URL", database_url)
@@ -73,7 +79,9 @@ def test_sqlite_store_persists_hash_chain(tmp_path: Path, monkeypatch: pytest.Mo
     assert events[0].sequence_number == 2
 
 
-def test_verify_audit_chain_endpoint(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_verify_audit_chain_endpoint(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     db_path = tmp_path / "audit-api.db"
     monkeypatch.setenv("HELIX_DATABASE_URL", f"sqlite:///{db_path}")
 
@@ -105,6 +113,76 @@ def test_verify_audit_chain_endpoint(tmp_path: Path, monkeypatch: pytest.MonkeyP
     body = verify_response.json()
     assert body["valid"] is True
     assert body["event_count"] >= 4
+
+
+def test_concurrent_appends_keep_sequence_unique(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import threading
+
+    db_path = tmp_path / "audit-concurrent.db"
+    monkeypatch.setenv("HELIX_DATABASE_URL", f"sqlite:///{db_path}")
+
+    from helixos.db.session import reset_engine
+
+    reset_engine()
+    service = AuditService(store=build_audit_store())
+
+    errors: list[Exception] = []
+
+    def append_event(index: int) -> None:
+        try:
+            service.record(
+                organization_id="org_demo",
+                actor=ACTOR,
+                event_type="ai.tool_call",
+                resource_type="agent_run",
+                resource_id=f"run_{index}",
+            )
+        except Exception as exc:  # noqa: BLE001 - collected for assertion
+            errors.append(exc)
+
+    thread_count = 20
+    threads = [
+        threading.Thread(target=append_event, args=(i,)) for i in range(thread_count)
+    ]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    assert not errors
+    verification = service.verify_chain(ACTOR, "org_demo")
+    assert verification.valid is True
+    assert verification.event_count == thread_count
+
+    events = service.list_for_actor(
+        ACTOR, organization_id="org_demo", limit=thread_count + 10
+    )
+    sequences = sorted(event.sequence_number for event in events)
+    assert sequences == list(range(1, thread_count + 1))
+
+
+def test_audit_list_respects_limit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    db_path = tmp_path / "audit-limit.db"
+    monkeypatch.setenv("HELIX_DATABASE_URL", f"sqlite:///{db_path}")
+
+    from helixos.db.session import reset_engine
+
+    reset_engine()
+    service = AuditService(store=build_audit_store())
+    for index in range(10):
+        service.record(
+            organization_id="org_demo",
+            actor=ACTOR,
+            event_type="ai.tool_call",
+            resource_id=f"run_{index}",
+        )
+
+    limited = service.list_for_actor(ACTOR, organization_id="org_demo", limit=3)
+    assert len(limited) == 3
 
 
 def test_canonical_timestamp_normalizes_naive_utc() -> None:

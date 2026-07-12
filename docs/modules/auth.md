@@ -42,6 +42,8 @@ The web app defaults to `org-demo-token` via `apps/web/.env.local`. Desktop inje
 - **ELN, molecular, AI, MCP, audit** — all call `organization_service.require_access(actor, organization_id)` before reads or writes.
 - **Audit** — events store `actor_subject` from the resolved actor.
 
+By default only the documented demo tokens are accepted; every other token is rejected with `401` (fails closed). Set `HELIX_ALLOW_UNVERIFIED_JWT=1` to additionally accept unsigned JWT payloads for local dev against a mock IdP. This flag must stay unset in production.
+
 Production deployments should replace local token parsing with signed JWT validation while preserving the same actor contract. See [API_CONTRACTS.md](../../API_CONTRACTS.md#authentication).
 
 ## Audit And Permissions

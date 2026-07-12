@@ -20,3 +20,7 @@ apps/desktop/release/
 postgres_data/
 minio_data/
 .data/
+
+# Local tool state
+.claude/
+.ferret/

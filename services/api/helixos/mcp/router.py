@@ -1,15 +1,24 @@
 """MCP connector registry routes."""
 
+import json
+from pathlib import Path
+
 from fastapi import APIRouter, Depends
 
 from helixos.auth.schemas import Actor
 from helixos.auth.service import get_current_actor
-from helixos.mcp.schemas import ConnectorJobRequest, ConnectorJobResult, ConnectorManifest
+from helixos.mcp.schemas import (
+    ConnectorJobRequest,
+    ConnectorJobResult,
+    ConnectorManifest,
+)
 from helixos.mcp.service import mcp_bridge_client
 
 router = APIRouter(prefix="/mcp", tags=["mcp"])
 
-CONNECTORS: tuple[ConnectorManifest, ...] = (
+REGISTRY_PATH = Path(__file__).resolve().parents[4] / "mcp" / "registry.json"
+
+_FALLBACK_CONNECTORS: tuple[ConnectorManifest, ...] = (
     ConnectorManifest(
         id="biopython-local",
         name="BioPython Local",
@@ -18,18 +27,28 @@ CONNECTORS: tuple[ConnectorManifest, ...] = (
         transport="stdio",
         enabled_by_default=True,
     ),
-    ConnectorManifest(
-        id="pubmed",
-        name="PubMed",
-        description="Literature search connector for biomedical references.",
-        scopes=["literature:search"],
-        transport="http",
-    ),
 )
 
 
+def _load_connectors() -> tuple[ConnectorManifest, ...]:
+    """Load connector manifests from mcp/registry.json (single source of truth).
+
+    Falls back to the built-in BioPython manifest when the registry file is
+    absent (e.g. partial packaged installs).
+    """
+    if not REGISTRY_PATH.exists():
+        return _FALLBACK_CONNECTORS
+    registry = json.loads(REGISTRY_PATH.read_text(encoding="utf-8"))
+    return tuple(ConnectorManifest(**entry) for entry in registry.get("connectors", []))
+
+
+CONNECTORS: tuple[ConnectorManifest, ...] = _load_connectors()
+
+
 @router.get("/connectors", response_model=list[ConnectorManifest])
-def list_connectors(_actor: Actor = Depends(get_current_actor)) -> list[ConnectorManifest]:
+def list_connectors(
+    _actor: Actor = Depends(get_current_actor),
+) -> list[ConnectorManifest]:
     """Return registered MCP connectors."""
     return list(CONNECTORS)
 

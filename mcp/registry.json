@@ -7,7 +7,7 @@
       "description": "Local sequence parsing and molecular biology utilities.",
       "scopes": ["sequence:read", "sequence:analyze"],
       "transport": "stdio",
-      "enabled_by_default": false
+      "enabled_by_default": true
     },
     {
       "id": "pubmed",

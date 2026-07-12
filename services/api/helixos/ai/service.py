@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import json
 from collections.abc import AsyncIterator
+from datetime import datetime, timezone
 from pathlib import Path
+
+from starlette.concurrency import run_in_threadpool
 
 from helixos.ai.models import AgentRunRecord, AgentRunStatus, AgentSessionRecord
 from helixos.ai.providers import AgentPromptContext, get_agent_provider
@@ -29,6 +32,8 @@ class AgentService:
         organization_service.require_access(actor, organization_id)
         session = AgentSessionRecord.create(organization_id)
         self._sessions[session.id] = session
+        # Sync method behind a sync endpoint — FastAPI already runs it in a
+        # threadpool, so the blocking audit write never touches the event loop.
         audit_service.record(
             organization_id=organization_id,
             actor=actor,
@@ -43,7 +48,9 @@ class AgentService:
         """Return a session or raise when missing."""
         session = self._sessions.get(session_id)
         if session is None:
-            raise api_error(status_code=404, code="not_found", message="Agent session not found")
+            raise api_error(
+                status_code=404, code="not_found", message="Agent session not found"
+            )
         return session
 
     async def stream_run(
@@ -63,7 +70,8 @@ class AgentService:
         run = AgentRunRecord.create(session_id, message)
         self._runs[run.id] = run
         run.status = AgentRunStatus.RUNNING
-        audit_service.record(
+        await run_in_threadpool(
+            audit_service.record,
             organization_id=session.organization_id,
             actor=actor,
             event_type="ai.run_started",
@@ -89,8 +97,9 @@ class AgentService:
             ):
                 yield frame
             run.status = AgentRunStatus.COMPLETED
-            run.completed_at = run.created_at
-            audit_service.record(
+            run.completed_at = datetime.now(timezone.utc)
+            await run_in_threadpool(
+                audit_service.record,
                 organization_id=session.organization_id,
                 actor=actor,
                 event_type="ai.run_completed",
@@ -101,7 +110,8 @@ class AgentService:
         except Exception as exc:  # noqa: BLE001 - surface agent failures as SSE errors
             run.status = AgentRunStatus.FAILED
             run.error = str(exc)
-            audit_service.record(
+            await run_in_threadpool(
+                audit_service.record,
                 organization_id=session.organization_id,
                 actor=actor,
                 event_type="ai.run_failed",
@@ -122,8 +132,12 @@ class AgentService:
         experiment_title: str | None,
         sequence_length: int | None,
     ) -> AsyncIterator[str]:
-        experiments = experiment_service.list_experiments(actor)
-        visible = [item for item in experiments if item.organization_id == organization_id]
+        experiments = await run_in_threadpool(
+            experiment_service.list_experiments, actor
+        )
+        visible = [
+            item for item in experiments if item.organization_id == organization_id
+        ]
 
         tool_payload = {
             "tool": "list_experiments",
@@ -131,7 +145,7 @@ class AgentService:
             "count": len(visible),
         }
         run.events.append({"event": "tool_call", "data": tool_payload})
-        self._record_tool_call(
+        await self._record_tool_call(
             organization_id=organization_id,
             actor=actor,
             run_id=run.id,
@@ -140,9 +154,13 @@ class AgentService:
         yield self._sse("tool_call", tool_payload)
 
         provider = get_agent_provider()
-        provider_payload = {"tool": "provider", "status": "running", "name": provider.name}
+        provider_payload = {
+            "tool": "provider",
+            "status": "running",
+            "name": provider.name,
+        }
         run.events.append({"event": "tool_call", "data": provider_payload})
-        self._record_tool_call(
+        await self._record_tool_call(
             organization_id=organization_id,
             actor=actor,
             run_id=run.id,
@@ -165,11 +183,15 @@ class AgentService:
             run.events.append({"event": "token", "data": token_payload})
             yield self._sse("token", token_payload)
 
-        done_payload = {"run_id": run.id, "status": AgentRunStatus.COMPLETED, "provider": provider.name}
+        done_payload = {
+            "run_id": run.id,
+            "status": AgentRunStatus.COMPLETED,
+            "provider": provider.name,
+        }
         run.events.append({"event": "done", "data": done_payload})
         yield self._sse("done", done_payload)
 
-    def _record_tool_call(
+    async def _record_tool_call(
         self,
         *,
         organization_id: str,
@@ -177,7 +199,8 @@ class AgentService:
         run_id: str,
         tool_payload: dict[str, object],
     ) -> None:
-        audit_service.record(
+        await run_in_threadpool(
+            audit_service.record,
             organization_id=organization_id,
             actor=actor,
             event_type="ai.tool_call",

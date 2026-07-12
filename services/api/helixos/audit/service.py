@@ -71,11 +71,17 @@ class AuditService:
             payload=dict(payload or {}),
         )
 
-    def list_for_actor(self, actor: Actor, organization_id: str | None = None) -> list[AuditEvent]:
+    def list_for_actor(
+        self, actor: Actor, organization_id: str | None = None, limit: int = 50
+    ) -> list[AuditEvent]:
         """List audit events visible to the authenticated actor."""
-        return self._store.list_for_actor(actor, organization_id=organization_id)
+        return self._store.list_for_actor(
+            actor, organization_id=organization_id, limit=limit
+        )
 
-    def verify_chain(self, actor: Actor, organization_id: str) -> AuditChainVerification:
+    def verify_chain(
+        self, actor: Actor, organization_id: str
+    ) -> AuditChainVerification:
         """Verify the hash chain for an organization."""
         organization_service.require_access(actor, organization_id)
         return self._store.verify_chain(organization_id)

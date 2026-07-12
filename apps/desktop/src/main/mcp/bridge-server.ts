@@ -1,12 +1,9 @@
 import http from "node:http";
+import { timingSafeEqual } from "node:crypto";
 
 import { McpHostManager } from "./host-manager";
 
-type BridgeServerOptions = {
-  host: string;
-  port: number;
-  manager: McpHostManager;
-};
+export const BRIDGE_TOKEN_HEADER = "x-helix-bridge-token";
 
 export class McpBridgeServer {
   private server: http.Server | null = null;
@@ -18,7 +15,8 @@ export class McpBridgeServer {
 
   constructor(
     private readonly host: string,
-    private readonly manager: McpHostManager
+    private readonly manager: McpHostManager,
+    private readonly token: string
   ) {}
 
   async start(preferredPort: number): Promise<number> {
@@ -62,6 +60,11 @@ export class McpBridgeServer {
         return;
       }
 
+      if (!this.isAuthorized(request)) {
+        writeJson(response, 401, { message: "Unauthorized" });
+        return;
+      }
+
       if (request.method === "GET" && url.pathname === "/connectors") {
         writeJson(response, 200, { connectors: this.manager.listStatuses() });
         return;
@@ -93,6 +96,17 @@ export class McpBridgeServer {
         message: error instanceof Error ? error.message : "Bridge failure"
       });
     }
+  }
+
+  private isAuthorized(request: http.IncomingMessage): boolean {
+    const header = request.headers[BRIDGE_TOKEN_HEADER];
+    const provided = Array.isArray(header) ? header[0] : header;
+    if (!provided) {
+      return false;
+    }
+    const expected = Buffer.from(this.token, "utf8");
+    const received = Buffer.from(provided, "utf8");
+    return expected.length === received.length && timingSafeEqual(expected, received);
   }
 }
 
@@ -133,6 +147,6 @@ function writeJson(response: http.ServerResponse, statusCode: number, payload: R
   response.end(JSON.stringify(payload));
 }
 
-export function createMcpBridgeServer(manager: McpHostManager, preferredPort = 8766): McpBridgeServer {
-  return new McpBridgeServer("127.0.0.1", manager);
+export function createMcpBridgeServer(manager: McpHostManager, token: string): McpBridgeServer {
+  return new McpBridgeServer("127.0.0.1", manager, token);
 }

@@ -30,14 +30,15 @@ def test_create_experiment_draft() -> None:
         headers=AUTH_HEADERS,
         json={
             "organization_id": "org_demo",
-            "title": "Gibson assembly",
+            "name": "Gibson assembly",
             "blocks": [{"type": "text", "content": "Draft assembly plan."}],
         },
     )
     assert response.status_code == 201
     body = response.json()
     assert body["id"].startswith("exp_")
-    assert body["status"] == "draft"
+    assert body["head_version_id"] is not None
+    assert body["version_count"] == 1
     assert body["organization_id"] == "org_demo"
 
 
@@ -46,12 +47,12 @@ def test_experiment_listing_is_scoped_to_actor_organizations() -> None:
     client.post(
         "/api/v1/experiments",
         headers=AUTH_HEADERS,
-        json={"organization_id": "org_demo", "title": "Demo experiment", "blocks": []},
+        json={"organization_id": "org_demo", "name": "Demo experiment", "blocks": []},
     )
     client.post(
         "/api/v1/experiments",
         headers=AUTH_HEADERS,
-        json={"organization_id": "org_qc", "title": "QC experiment", "blocks": []},
+        json={"organization_id": "org_qc", "name": "QC experiment", "blocks": []},
     )
 
     response = client.get("/api/v1/experiments", headers=ORG_DEMO_HEADERS)
@@ -65,7 +66,7 @@ def test_experiment_create_rejects_unavailable_organization() -> None:
     response = client.post(
         "/api/v1/experiments",
         headers=ORG_DEMO_HEADERS,
-        json={"organization_id": "org_qc", "title": "Cross-tenant write", "blocks": []},
+        json={"organization_id": "org_qc", "name": "Cross-tenant write", "blocks": []},
     )
 
     assert response.status_code == 403
@@ -91,7 +92,9 @@ def test_list_organizations_visible_to_actor() -> None:
 
 def test_get_sequence_metadata() -> None:
     client = TestClient(create_app())
-    response = client.get("/api/v1/sequences/seq_demo_reporter", headers=ORG_DEMO_HEADERS)
+    response = client.get(
+        "/api/v1/sequences/seq_demo_reporter", headers=ORG_DEMO_HEADERS
+    )
 
     assert response.status_code == 200
     body = response.json()
@@ -168,6 +171,7 @@ def test_mcp_job_requires_bridge() -> None:
         "/api/v1/mcp/jobs",
         headers=ORG_DEMO_HEADERS,
         json={
+            "organization_id": "org_demo",
             "connector_id": "biopython-local",
             "tool": "analyze_sequence",
             "arguments": {"sequence": "ATGC"},
@@ -184,6 +188,7 @@ def test_mcp_job_rejects_unknown_connector() -> None:
         "/api/v1/mcp/jobs",
         headers=ORG_DEMO_HEADERS,
         json={
+            "organization_id": "org_demo",
             "connector_id": "unknown",
             "tool": "analyze_sequence",
             "arguments": {},
@@ -194,21 +199,80 @@ def test_mcp_job_rejects_unknown_connector() -> None:
     assert response.json()["error"]["code"] == "not_found"
 
 
-def test_update_experiment_status() -> None:
+def test_mcp_job_rejects_cross_tenant_organization() -> None:
+    client = TestClient(create_app())
+    response = client.post(
+        "/api/v1/mcp/jobs",
+        headers=ORG_DEMO_HEADERS,
+        json={
+            "organization_id": "org_qc",
+            "connector_id": "biopython-local",
+            "tool": "analyze_sequence",
+            "arguments": {"sequence": "ATGC"},
+        },
+    )
+
+    assert response.status_code == 403
+    assert response.json()["error"]["code"] == "forbidden"
+
+
+def test_unverified_jwt_rejected_by_default(monkeypatch) -> None:
+    monkeypatch.delenv("HELIX_ALLOW_UNVERIFIED_JWT", raising=False)
+    import base64
+    import json as json_lib
+
+    def _segment(data: dict) -> str:
+        raw = (
+            base64.urlsafe_b64encode(json_lib.dumps(data).encode()).decode().rstrip("=")
+        )
+        return raw
+
+    token = f"{_segment({'alg': 'none'})}.{_segment({'sub': 'attacker', 'organization_ids': ['org_demo']})}.sig"
+    client = TestClient(create_app())
+    response = client.get(
+        "/api/v1/experiments", headers={"Authorization": f"Bearer {token}"}
+    )
+
+    assert response.status_code == 401
+    assert response.json()["error"]["code"] == "unauthorized"
+
+
+def test_unverified_jwt_allowed_when_enabled(monkeypatch) -> None:
+    monkeypatch.setenv("HELIX_ALLOW_UNVERIFIED_JWT", "1")
+    import base64
+    import json as json_lib
+
+    def _segment(data: dict) -> str:
+        return (
+            base64.urlsafe_b64encode(json_lib.dumps(data).encode()).decode().rstrip("=")
+        )
+
+    token = f"{_segment({'alg': 'none'})}.{_segment({'sub': 'dev-user', 'organization_ids': ['org_demo']})}.sig"
+    client = TestClient(create_app())
+    response = client.get(
+        "/api/v1/experiments", headers={"Authorization": f"Bearer {token}"}
+    )
+
+    assert response.status_code == 200
+
+
+def test_update_version_status() -> None:
     client = TestClient(create_app())
     create_response = client.post(
         "/api/v1/experiments",
         headers=ORG_DEMO_HEADERS,
         json={
             "organization_id": "org_demo",
-            "title": "Status transition test",
+            "name": "Status transition test",
             "blocks": [{"type": "text", "content": "Draft note."}],
         },
     )
-    experiment_id = create_response.json()["id"]
+    body = create_response.json()
+    experiment_id = body["id"]
+    version_id = body["head_version_id"]
 
     response = client.patch(
-        f"/api/v1/experiments/{experiment_id}",
+        f"/api/v1/experiments/{experiment_id}/versions/{version_id}",
         headers=ORG_DEMO_HEADERS,
         json={"status": "in_review"},
     )
@@ -217,21 +281,23 @@ def test_update_experiment_status() -> None:
     assert response.json()["status"] == "in_review"
 
 
-def test_update_experiment_status_rejects_invalid_transition() -> None:
+def test_update_version_status_rejects_invalid_transition() -> None:
     client = TestClient(create_app())
     create_response = client.post(
         "/api/v1/experiments",
         headers=ORG_DEMO_HEADERS,
         json={
             "organization_id": "org_demo",
-            "title": "Invalid transition test",
+            "name": "Invalid transition test",
             "blocks": [],
         },
     )
-    experiment_id = create_response.json()["id"]
+    body = create_response.json()
+    experiment_id = body["id"]
+    version_id = body["head_version_id"]
 
     response = client.patch(
-        f"/api/v1/experiments/{experiment_id}",
+        f"/api/v1/experiments/{experiment_id}/versions/{version_id}",
         headers=ORG_DEMO_HEADERS,
         json={"status": "signed"},
     )
@@ -247,7 +313,7 @@ def test_experiment_create_records_audit_event() -> None:
         headers=ORG_DEMO_HEADERS,
         json={
             "organization_id": "org_demo",
-            "title": "Audit test experiment",
+            "name": "Audit test experiment",
             "blocks": [],
         },
     )
@@ -261,5 +327,7 @@ def test_experiment_create_records_audit_event() -> None:
     assert audit_response.status_code == 200
     events = audit_response.json()
     assert any(
-        event["event_type"] == "eln.experiment_created" and event["resource_id"] == experiment_id for event in events
+        event["event_type"] == "eln.experiment_created"
+        and event["resource_id"] == experiment_id
+        for event in events
     )

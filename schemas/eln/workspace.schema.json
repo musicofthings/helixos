@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://helixos.dev/schemas/eln/workspace.schema.json",
+  "title": "Workspace",
+  "type": "object",
+  "required": ["id", "organization_id", "name", "category", "is_default", "created_at", "updated_at"],
+  "properties": {
+    "id": { "type": "string" },
+    "organization_id": { "type": "string" },
+    "name": { "type": "string", "minLength": 1 },
+    "category": {
+      "type": "string",
+      "enum": ["molecular_biology", "biochemistry", "microbiology", "genomics", "cell_biology", "custom"]
+    },
+    "description": { "type": ["string", "null"] },
+    "is_default": { "type": "boolean" },
+    "created_at": { "type": "string", "format": "date-time" },
+    "updated_at": { "type": "string", "format": "date-time" }
+  }
+}

@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://helixos.dev/schemas/eln/experiment_version.schema.json",
+  "title": "ExperimentVersion",
+  "type": "object",
+  "required": [
+    "id",
+    "experiment_id",
+    "organization_id",
+    "version_number",
+    "message",
+    "status",
+    "blocks",
+    "author_subject",
+    "created_at"
+  ],
+  "properties": {
+    "id": { "type": "string" },
+    "experiment_id": { "type": "string" },
+    "organization_id": { "type": "string" },
+    "version_number": { "type": "integer", "minimum": 1 },
+    "parent_version_id": { "type": ["string", "null"] },
+    "message": { "type": "string", "minLength": 1 },
+    "status": {
+      "type": "string",
+      "enum": ["draft", "in_review", "signed", "amended", "archived"]
+    },
+    "blocks": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/block" }
+    },
+    "author_subject": { "type": "string" },
+    "created_at": { "type": "string", "format": "date-time" }
+  },
+  "$defs": {
+    "block": {
+      "type": "object",
+      "required": ["type", "content"],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["text", "table", "protocol_steps", "reagent_list", "sequence", "image", "chart", "ai_annotation"]
+        },
+        "content": {}
+      }
+    }
+  }
+}

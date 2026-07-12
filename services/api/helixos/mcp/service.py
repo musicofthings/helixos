@@ -7,8 +7,11 @@ from typing import Any
 
 import httpx
 
+from starlette.concurrency import run_in_threadpool
+
 from helixos.audit.service import audit_service
 from helixos.auth.schemas import Actor
+from helixos.auth.service import organization_service
 from helixos.errors import api_error
 from helixos.mcp.schemas import ConnectorJobRequest, ConnectorJobResult
 
@@ -16,19 +19,27 @@ from helixos.mcp.schemas import ConnectorJobRequest, ConnectorJobResult
 class MCPBridgeClient:
     """Calls the desktop MCP bridge when available."""
 
-    def __init__(self, bridge_url: str | None) -> None:
+    def __init__(self, bridge_url: str | None, bridge_token: str | None = None) -> None:
         self._bridge_url = bridge_url.rstrip("/") if bridge_url else None
+        self._bridge_token = bridge_token
 
     @classmethod
     def from_env(cls) -> "MCPBridgeClient":
-        return cls(os.getenv("HELIX_MCP_BRIDGE_URL"))
+        return cls(
+            os.getenv("HELIX_MCP_BRIDGE_URL"), os.getenv("HELIX_MCP_BRIDGE_TOKEN")
+        )
 
     @property
     def available(self) -> bool:
         return bool(self._bridge_url)
 
-    async def run_tool(self, request: ConnectorJobRequest, actor: Actor) -> ConnectorJobResult:
+    async def run_tool(
+        self, request: ConnectorJobRequest, actor: Actor
+    ) -> ConnectorJobResult:
         """Dispatch a connector tool call through the desktop bridge."""
+        organization_id = request.organization_id
+        organization_service.require_access(actor, organization_id)
+
         if not self._bridge_url:
             raise api_error(
                 status_code=503,
@@ -36,8 +47,8 @@ class MCPBridgeClient:
                 message="MCP bridge is unavailable. Launch HelixOS desktop to run stdio connectors.",
             )
 
-        organization_id = actor.organization_ids[0] if actor.organization_ids else "unknown"
-        audit_service.record(
+        await run_in_threadpool(
+            audit_service.record,
             organization_id=organization_id,
             actor=actor,
             event_type="mcp.job_started",
@@ -49,12 +60,20 @@ class MCPBridgeClient:
             },
         )
 
-        url = f"{self._bridge_url}/connectors/{request.connector_id}/tools/{request.tool}"
+        url = (
+            f"{self._bridge_url}/connectors/{request.connector_id}/tools/{request.tool}"
+        )
+        headers = (
+            {"x-helix-bridge-token": self._bridge_token} if self._bridge_token else {}
+        )
         try:
             async with httpx.AsyncClient(timeout=30.0) as client:
-                response = await client.post(url, json={"arguments": request.arguments})
+                response = await client.post(
+                    url, json={"arguments": request.arguments}, headers=headers
+                )
         except httpx.HTTPError as exc:
-            audit_service.record(
+            await run_in_threadpool(
+                audit_service.record,
                 organization_id=organization_id,
                 actor=actor,
                 event_type="mcp.job_failed",
@@ -75,7 +94,8 @@ class MCPBridgeClient:
                 detail = response.json()
             except ValueError:
                 detail = {"message": response.text}
-            audit_service.record(
+            await run_in_threadpool(
+                audit_service.record,
                 organization_id=organization_id,
                 actor=actor,
                 event_type="mcp.job_failed",
@@ -97,7 +117,8 @@ class MCPBridgeClient:
             status=str(payload.get("status", "completed")),
             result=payload.get("result"),
         )
-        audit_service.record(
+        await run_in_threadpool(
+            audit_service.record,
             organization_id=organization_id,
             actor=actor,
             event_type="mcp.job_completed",
