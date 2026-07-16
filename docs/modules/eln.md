@@ -7,15 +7,34 @@ The ELN module is the core of HelixOS — the durable, tenant-scoped, audited sy
 ## Data Hierarchy
 
 ```txt
-Workspace (category)          molecular biology, biochemistry, microbiology, ... (user-defined)
+Workspace (category + optional subcategory)   user-defined; category chosen at creation
   └─ Project                  user-defined program of work
-       └─ Experiment          a "repo" that tracks a HEAD version
+       └─ Experiment          a "repo" that tracks a HEAD version — created *inside* a project
             ├─ ExperimentVersion   immutable snapshot ("commit"), git-style lineage
             └─ Sample          up to 96 per experiment, optional 96-well plate position
                  └─ Dataset    DNA / RNA / protein sequence, measurement, or file
 ```
 
 Every entity carries `organization_id` and is isolated by tenant. Defaults: each organization can be seeded with **Molecular Biology**, **Biochemistry**, and **Microbiology** workspaces via `POST /api/v1/workspaces/seed-defaults`.
+
+### Workspace categories & subcategories
+
+A workspace is created by choosing a `category`; some categories carry an optional free-string `subcategory`:
+
+| Category | Suggested subcategories |
+| --- | --- |
+| `molecular_biology` | — |
+| `biochemistry` | — |
+| `microbiology` | — |
+| `next_gen_sequencing` | DNA, RNA, Protein |
+| `digital_pathology` | Cells, Tissues |
+| `programmable_bio` | Single-cell experiments, PerturbGen, Protein-protein interaction studies (extensible) |
+
+The suggested subcategory lists live in `CATEGORY_SUBCATEGORIES` (`eln/schemas.py`) and are mirrored in the web create-workspace form. They are advisory: `subcategory` is stored as a free string, and the form's "Other…" option lets labs add their own (e.g. new Programmable Bio assays) without a schema change. `genomics` and `cell_biology` are retained only so workspaces saved under the earlier taxonomy still load.
+
+### Creating, resuming, and deleting workspaces
+
+Workspaces are managed from the lab navigator: create (choose category → subcategory), resume (select an existing workspace to keep working in it), and delete. **Experiments are always created nested under a project**, never directly at the workspace level. `DELETE` on a workspace, project, or experiment cascades to everything beneath it in one transaction (the web UI requires an explicit confirmation).
 
 ## Experiment Versioning ("git for experiments")
 
@@ -40,7 +59,7 @@ Text · Table · Protocol steps · Reagent list · Sequence · Image · Chart ·
 
 ## User Surface
 
-The web workspace **Experiments** tab calls this module via `packages/api-client`:
+The web workspace **Lab notebook** tab (the default landing view) calls this module via `packages/api-client`:
 
 - Create experiment → `POST /api/v1/experiments` (creates version 1)
 - List experiments → `GET /api/v1/experiments`
@@ -60,6 +79,7 @@ The ELN persists through SQLAlchemy (Postgres in production, SQLite for local/de
 ## Audit And Permissions
 
 All mutations are tenant-scoped through the [auth](auth.md) actor and recorded in [audit](audit.md):
-`eln.workspace_created`, `eln.workspaces_seeded`, `eln.project_created`, `eln.project_updated`,
-`eln.experiment_created`, `eln.experiment_version_committed`, `eln.experiment_version_status_changed`,
+`eln.workspace_created`, `eln.workspace_deleted`, `eln.workspaces_seeded`, `eln.project_created`,
+`eln.project_updated`, `eln.project_deleted`, `eln.experiment_created`, `eln.experiment_deleted`,
+`eln.experiment_version_committed`, `eln.experiment_version_status_changed`,
 `eln.sample_created`, `eln.sample_updated`, `eln.dataset_created`. Agent runs that reference experiments emit `ai.*` audit events.

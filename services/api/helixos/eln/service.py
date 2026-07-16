@@ -152,6 +152,19 @@ class ElnService:
         organization_service.require_access(actor, workspace.organization_id)
         return workspace
 
+    def delete_workspace(self, workspace_id: str, actor: Actor) -> None:
+        """Delete a workspace and everything nested beneath it."""
+        workspace = self.get_workspace(workspace_id, actor)
+        self._store.delete_workspace(workspace_id)
+        audit_service.record(
+            organization_id=workspace.organization_id,
+            actor=actor,
+            event_type="eln.workspace_deleted",
+            resource_type="workspace",
+            resource_id=workspace_id,
+            payload={"name": workspace.name, "category": workspace.category.value},
+        )
+
     # ----------------------------------------------------------------- #
     # Projects
     # ----------------------------------------------------------------- #
@@ -207,6 +220,19 @@ class ElnService:
             payload={"fields": sorted(updates.keys())},
         )
         return updated
+
+    def delete_project(self, project_id: str, actor: Actor) -> None:
+        """Delete a project and every experiment (and below) inside it."""
+        project = self.get_project(project_id, actor)
+        self._store.delete_project(project_id)
+        audit_service.record(
+            organization_id=project.organization_id,
+            actor=actor,
+            event_type="eln.project_deleted",
+            resource_type="project",
+            resource_id=project_id,
+            payload={"name": project.name, "workspace_id": project.workspace_id},
+        )
 
     # ----------------------------------------------------------------- #
     # Experiments + versions
@@ -266,6 +292,19 @@ class ElnService:
             raise _not_found("experiment", experiment_id)
         organization_service.require_access(actor, experiment.organization_id)
         return experiment
+
+    def delete_experiment(self, experiment_id: str, actor: Actor) -> None:
+        """Delete an experiment and its versions, samples, and datasets."""
+        experiment = self.get_experiment(experiment_id, actor)
+        self._store.delete_experiment(experiment_id)
+        audit_service.record(
+            organization_id=experiment.organization_id,
+            actor=actor,
+            event_type="eln.experiment_deleted",
+            resource_type="experiment",
+            resource_id=experiment_id,
+            payload={"name": experiment.name, "project_id": experiment.project_id},
+        )
 
     def commit_version(
         self, experiment_id: str, payload: ExperimentVersionCreate, actor: Actor

@@ -52,6 +52,18 @@ class MemoryElnStore:
             1 for w in self._workspaces.values() if w.organization_id == organization_id
         )
 
+    def delete_workspace(self, workspace_id: str) -> None:
+        with self._lock:
+            project_ids = [
+                p.id
+                for p in self._projects.values()
+                if p.workspace_id == workspace_id
+            ]
+            for project_id in project_ids:
+                self._delete_project_subtree(project_id)
+                self._projects.pop(project_id, None)
+            self._workspaces.pop(workspace_id, None)
+
     # Projects
     def create_project(self, project: Project) -> Project:
         with self._lock:
@@ -77,6 +89,11 @@ class MemoryElnStore:
         with self._lock:
             self._projects[project.id] = project
         return project
+
+    def delete_project(self, project_id: str) -> None:
+        with self._lock:
+            self._delete_project_subtree(project_id)
+            self._projects.pop(project_id, None)
 
     # Experiments
     def create_experiment_with_version(
@@ -106,6 +123,40 @@ class MemoryElnStore:
         with self._lock:
             self._experiments[experiment.id] = experiment
         return experiment
+
+    def delete_experiment(self, experiment_id: str) -> None:
+        with self._lock:
+            self._delete_experiment_subtree(experiment_id)
+
+    def _delete_project_subtree(self, project_id: str) -> None:
+        # Caller holds the lock. Removes every experiment (and its versions,
+        # samples, datasets) under the project, but not the project row itself.
+        experiment_ids = [
+            e.id
+            for e in self._experiments.values()
+            if e.project_id == project_id
+        ]
+        for experiment_id in experiment_ids:
+            self._delete_experiment_subtree(experiment_id)
+
+    def _delete_experiment_subtree(self, experiment_id: str) -> None:
+        # Caller holds the lock.
+        sample_ids = [
+            s.id
+            for s in self._samples.values()
+            if s.experiment_id == experiment_id
+        ]
+        for sample_id in sample_ids:
+            for dataset_id in [
+                d.id for d in self._datasets.values() if d.sample_id == sample_id
+            ]:
+                self._datasets.pop(dataset_id, None)
+            self._samples.pop(sample_id, None)
+        for version_id in [
+            v.id for v in self._versions.values() if v.experiment_id == experiment_id
+        ]:
+            self._versions.pop(version_id, None)
+        self._experiments.pop(experiment_id, None)
 
     # Versions
     def append_version(self, version: ExperimentVersion) -> ExperimentVersion:

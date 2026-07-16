@@ -80,7 +80,7 @@ const workflow = ["Sample Received", "DNA Extraction", "QC", "Library Prep", "Se
 
 const navItems: Array<{ id: View; icon: LucideIcon; label: string }> = [
   { id: "workspace", icon: ClipboardList, label: "Workspace" },
-  { id: "experiments", icon: FlaskConical, label: "Experiments" },
+  { id: "experiments", icon: FlaskConical, label: "Lab notebook" },
   { id: "sequences", icon: Dna, label: "Sequences" },
   { id: "inventory", icon: Beaker, label: "Inventory" },
   { id: "connectors", icon: Network, label: "Connectors" }
@@ -172,9 +172,10 @@ export function WorkspaceApp({ initialDesktopShell = false }: { initialDesktopSh
   const demoSequenceQuery = useSequence(DEMO_SEQUENCE_ID, apiEnabled && Boolean(primaryOrganizationId));
 
   const experiments = useMemo(() => experimentsQuery.data ?? [], [experimentsQuery.data]);
-  const [activeView, setActiveView] = useState<View>("workspace");
+  const [activeView, setActiveView] = useState<View>("experiments");
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const [selectedExperimentId, setSelectedExperimentId] = useState<string | undefined>();
+  const [newExperimentNonce, setNewExperimentNonce] = useState(0);
   const [inventory, setInventory] = useState(initialInventory);
   const [connectorState, setConnectorState] = useState<Record<string, Pick<ConnectorState, "enabled" | "lastRun">>>({});
   const [workflowStep, setWorkflowStep] = useState(2);
@@ -402,7 +403,7 @@ export function WorkspaceApp({ initialDesktopShell = false }: { initialDesktopSh
   const commandItems = useMemo<CommandPaletteItem[]>(
     () => [
       { id: "nav-workspace", label: "Go to workspace", group: "Navigate", run: () => setActiveView("workspace") },
-      { id: "nav-experiments", label: "Go to experiments", group: "Navigate", run: () => setActiveView("experiments") },
+      { id: "nav-experiments", label: "Go to lab notebook", group: "Navigate", run: () => setActiveView("experiments") },
       { id: "nav-sequences", label: "Go to sequences", group: "Navigate", run: () => setActiveView("sequences") },
       { id: "nav-inventory", label: "Go to inventory", group: "Navigate", run: () => setActiveView("inventory") },
       { id: "nav-connectors", label: "Go to connectors", group: "Navigate", run: () => setActiveView("connectors") },
@@ -541,7 +542,10 @@ export function WorkspaceApp({ initialDesktopShell = false }: { initialDesktopSh
               <kbd className="rounded border border-black/10 px-1.5 py-0.5 text-[10px] text-graphite">⌘K</kbd>
             </button>
             <button
-              onClick={() => setActiveView("experiments")}
+              onClick={() => {
+                setActiveView("experiments");
+                setNewExperimentNonce((nonce) => nonce + 1);
+              }}
               className="inline-flex items-center gap-2 rounded-md bg-fern px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-[#1d513c]"
             >
               <Plus size={16} />
@@ -640,6 +644,7 @@ export function WorkspaceApp({ initialDesktopShell = false }: { initialDesktopSh
               selectedExperimentId={selectedExperimentId}
               onSelectExperiment={setSelectedExperimentId}
               onActivity={log}
+              newExperimentNonce={newExperimentNonce}
             />
           )}
 
