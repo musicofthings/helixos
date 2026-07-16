@@ -27,14 +27,37 @@ def _now() -> datetime:
 # Enums
 # --------------------------------------------------------------------------- #
 class WorkspaceCategory(StrEnum):
-    """Scientific category a workspace organizes work under."""
+    """Scientific category a workspace organizes work under.
+
+    Some categories carry a further ``subcategory`` refinement (see
+    ``CATEGORY_SUBCATEGORIES``); the subcategory itself is stored as a free
+    string so labs can extend the suggested lists (e.g. new Programmable Bio
+    assays) without a schema change.
+    """
 
     MOLECULAR_BIOLOGY = "molecular_biology"
     BIOCHEMISTRY = "biochemistry"
     MICROBIOLOGY = "microbiology"
+    NEXT_GEN_SEQUENCING = "next_gen_sequencing"
+    DIGITAL_PATHOLOGY = "digital_pathology"
+    PROGRAMMABLE_BIO = "programmable_bio"
+    # Retained so workspaces persisted under the earlier taxonomy still load.
     GENOMICS = "genomics"
     CELL_BIOLOGY = "cell_biology"
     CUSTOM = "custom"
+
+
+# Suggested subcategories surfaced in the create-workspace form. Not enforced by
+# the API: the list is advisory, and labs may store any subcategory string.
+CATEGORY_SUBCATEGORIES: dict[WorkspaceCategory, tuple[str, ...]] = {
+    WorkspaceCategory.NEXT_GEN_SEQUENCING: ("DNA", "RNA", "Protein"),
+    WorkspaceCategory.DIGITAL_PATHOLOGY: ("Cells", "Tissues"),
+    WorkspaceCategory.PROGRAMMABLE_BIO: (
+        "Single-cell experiments",
+        "PerturbGen",
+        "Protein-protein interaction studies",
+    ),
+}
 
 
 class ProjectStatus(StrEnum):
@@ -115,6 +138,7 @@ class WorkspaceCreate(BaseModel):
     organization_id: str
     name: str = Field(min_length=1)
     category: WorkspaceCategory = WorkspaceCategory.CUSTOM
+    subcategory: str | None = Field(default=None, max_length=64)
     description: str | None = None
 
 

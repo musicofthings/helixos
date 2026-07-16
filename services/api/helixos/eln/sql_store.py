@@ -81,6 +81,7 @@ class SqlElnStore:
                     organization_id=workspace.organization_id,
                     name=workspace.name,
                     category=workspace.category.value,
+                    subcategory=workspace.subcategory,
                     description=workspace.description,
                     is_default=workspace.is_default,
                     created_at=workspace.created_at,
@@ -113,6 +114,27 @@ class SqlElnStore:
                 )
                 or 0
             )
+
+    def delete_workspace(self, workspace_id: str) -> None:
+        # Cascade: datasets -> samples -> versions -> experiments -> projects ->
+        # workspace, in one transaction so a partial delete can't orphan rows.
+        with session_scope() as session:
+            project_ids = list(
+                session.scalars(
+                    select(ProjectORM.id).where(
+                        ProjectORM.workspace_id == workspace_id
+                    )
+                ).all()
+            )
+            for project_id in project_ids:
+                self._delete_project_subtree(session, project_id)
+            if project_ids:
+                session.query(ProjectORM).filter(
+                    ProjectORM.id.in_(project_ids)
+                ).delete(synchronize_session=False)
+            workspace = session.get(WorkspaceORM, workspace_id)
+            if workspace is not None:
+                session.delete(workspace)
 
     # Projects
     def create_project(self, project: Project) -> Project:
@@ -157,6 +179,13 @@ class SqlElnStore:
                 row.status = project.status.value
                 row.updated_at = project.updated_at
         return project
+
+    def delete_project(self, project_id: str) -> None:
+        with session_scope() as session:
+            self._delete_project_subtree(session, project_id)
+            project = session.get(ProjectORM, project_id)
+            if project is not None:
+                session.delete(project)
 
     # Experiments
     def create_experiment_with_version(
@@ -210,6 +239,45 @@ class SqlElnStore:
                 row.version_count = experiment.version_count
                 row.updated_at = experiment.updated_at
         return experiment
+
+    def delete_experiment(self, experiment_id: str) -> None:
+        with session_scope() as session:
+            self._delete_experiment_subtree(session, experiment_id)
+
+    @staticmethod
+    def _delete_project_subtree(session, project_id: str) -> None:
+        experiment_ids = list(
+            session.scalars(
+                select(ExperimentORM.id).where(
+                    ExperimentORM.project_id == project_id
+                )
+            ).all()
+        )
+        for experiment_id in experiment_ids:
+            SqlElnStore._delete_experiment_subtree(session, experiment_id)
+
+    @staticmethod
+    def _delete_experiment_subtree(session, experiment_id: str) -> None:
+        sample_ids = list(
+            session.scalars(
+                select(SampleORM.id).where(
+                    SampleORM.experiment_id == experiment_id
+                )
+            ).all()
+        )
+        if sample_ids:
+            session.query(DatasetORM).filter(
+                DatasetORM.sample_id.in_(sample_ids)
+            ).delete(synchronize_session=False)
+        session.query(SampleORM).filter(
+            SampleORM.experiment_id == experiment_id
+        ).delete(synchronize_session=False)
+        session.query(ExperimentVersionORM).filter(
+            ExperimentVersionORM.experiment_id == experiment_id
+        ).delete(synchronize_session=False)
+        session.query(ExperimentORM).filter(
+            ExperimentORM.id == experiment_id
+        ).delete(synchronize_session=False)
 
     # Versions
     def append_version(self, version: ExperimentVersion) -> ExperimentVersion:
@@ -425,6 +493,7 @@ def _to_workspace(row: WorkspaceORM) -> Workspace:
         organization_id=row.organization_id,
         name=row.name,
         category=row.category,
+        subcategory=row.subcategory,
         description=row.description,
         is_default=row.is_default,
         created_at=row.created_at,

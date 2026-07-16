@@ -1,13 +1,16 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useState } from "react";
-import { ChevronRight, FolderPlus, LayoutGrid, LoaderCircle, Plus } from "lucide-react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { ChevronRight, FolderPlus, LayoutGrid, LoaderCircle, Plus, Trash2 } from "lucide-react";
 import type { WorkspaceCategory } from "@helixos/types";
 
 import {
   useCreateExperiment,
   useCreateProject,
   useCreateWorkspace,
+  useDeleteExperiment,
+  useDeleteProject,
+  useDeleteWorkspace,
   useExperiments,
   useProjects,
   useSeedDefaultWorkspaces,
@@ -15,40 +18,78 @@ import {
 } from "../../hooks/use-helix-api";
 import { ExperimentDetail } from "./experiment-detail";
 
-const WORKSPACE_CATEGORIES: WorkspaceCategory[] = [
-  "molecular_biology",
-  "biochemistry",
-  "microbiology",
-  "genomics",
-  "cell_biology",
-  "custom"
+type CategoryDef = {
+  value: WorkspaceCategory;
+  label: string;
+  subcategories: string[];
+};
+
+// Mirrors CATEGORY_SUBCATEGORIES in services/api/helixos/eln/schemas.py. The
+// subcategory is stored as a free string, so these lists are suggestions the
+// "Other…" option lets the user extend.
+const CATEGORY_TAXONOMY: CategoryDef[] = [
+  { value: "molecular_biology", label: "Molecular Biology", subcategories: [] },
+  { value: "biochemistry", label: "Biochemistry", subcategories: [] },
+  { value: "microbiology", label: "Microbiology", subcategories: [] },
+  {
+    value: "next_gen_sequencing",
+    label: "Next Generation Sequencing",
+    subcategories: ["DNA", "RNA", "Protein"]
+  },
+  {
+    value: "digital_pathology",
+    label: "Digital Pathology & Imaging",
+    subcategories: ["Cells", "Tissues"]
+  },
+  {
+    value: "programmable_bio",
+    label: "Programmable Bio",
+    subcategories: ["Single-cell experiments", "PerturbGen", "Protein-protein interaction studies"]
+  },
+  { value: "custom", label: "Custom", subcategories: [] }
 ];
 
+const CATEGORY_LABELS: Record<string, string> = Object.fromEntries(
+  CATEGORY_TAXONOMY.map((entry) => [entry.value, entry.label])
+);
+
+const OTHER_SUBCATEGORY = "__other__";
+
 function categoryLabel(category: string): string {
-  return category
-    .split("_")
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-    .join(" ");
+  return (
+    CATEGORY_LABELS[category] ??
+    category
+      .split("_")
+      .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+      .join(" ")
+  );
 }
+
+type DeleteTarget = { kind: "workspace" | "project" | "experiment"; id: string; name: string };
 
 export function LabView({
   organizationId,
   apiEnabled,
   selectedExperimentId,
   onSelectExperiment,
-  onActivity
+  onActivity,
+  newExperimentNonce = 0
 }: {
   organizationId?: string;
   apiEnabled: boolean;
   selectedExperimentId?: string;
   onSelectExperiment: (id: string | undefined) => void;
   onActivity: (message: string) => void;
+  newExperimentNonce?: number;
 }) {
   const workspacesQuery = useWorkspaces(organizationId, apiEnabled);
   const seedWorkspaces = useSeedDefaultWorkspaces(organizationId);
   const createWorkspace = useCreateWorkspace(organizationId);
+  const deleteWorkspace = useDeleteWorkspace(organizationId);
   const createProject = useCreateProject(organizationId);
+  const deleteProject = useDeleteProject(organizationId);
   const createExperiment = useCreateExperiment(organizationId);
+  const deleteExperiment = useDeleteExperiment(organizationId);
 
   const workspaces = useMemo(() => workspacesQuery.data ?? [], [workspacesQuery.data]);
 
@@ -70,25 +111,34 @@ export function LabView({
   const [showWorkspaceForm, setShowWorkspaceForm] = useState(false);
   const [workspaceName, setWorkspaceName] = useState("");
   const [workspaceCategory, setWorkspaceCategory] = useState<WorkspaceCategory>("molecular_biology");
+  const [workspaceSubcategory, setWorkspaceSubcategory] = useState("");
+  const [workspaceSubcategoryOther, setWorkspaceSubcategoryOther] = useState("");
   const [showProjectForm, setShowProjectForm] = useState(false);
   const [projectName, setProjectName] = useState("");
   const [showExperimentForm, setShowExperimentForm] = useState(false);
   const [experimentName, setExperimentName] = useState("");
+  const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null);
 
-  // Auto-select the first item as lists load so the workbench is never empty.
+  const activeCategory = CATEGORY_TAXONOMY.find((entry) => entry.value === workspaceCategory);
+  const categoryHasSubcategories = (activeCategory?.subcategories.length ?? 0) > 0;
+
+  // Keep selections valid as lists load or entities are deleted: fall back to
+  // the first available item, or clear when nothing remains.
   useEffect(() => {
-    if (!selectedWorkspaceId && workspaces.length > 0) {
-      setSelectedWorkspaceId(workspaces[0].id);
+    const stillThere = workspaces.some((workspace) => workspace.id === selectedWorkspaceId);
+    if (!stillThere) {
+      setSelectedWorkspaceId(workspaces[0]?.id);
     }
-  }, [selectedWorkspaceId, workspaces]);
+  }, [workspaces, selectedWorkspaceId]);
 
   useEffect(() => {
     setSelectedProjectId(undefined);
   }, [selectedWorkspaceId]);
 
   useEffect(() => {
-    if (!selectedProjectId && projects.length > 0) {
-      setSelectedProjectId(projects[0].id);
+    const stillThere = projects.some((project) => project.id === selectedProjectId);
+    if (!stillThere) {
+      setSelectedProjectId(projects[0]?.id);
     }
   }, [projects, selectedProjectId]);
 
@@ -100,22 +150,59 @@ export function LabView({
     }
   }, [experiments, onSelectExperiment, selectedExperimentId]);
 
+  // Header "New experiment" button raises an intent: open the experiment form
+  // when a project is selected, otherwise guide the user to create the missing
+  // parent first (experiments only exist nested under a project).
+  const handledNonce = useRef(newExperimentNonce);
+  useEffect(() => {
+    if (newExperimentNonce === handledNonce.current) return;
+    handledNonce.current = newExperimentNonce;
+    if (selectedProjectId) {
+      setShowExperimentForm(true);
+    } else if (selectedWorkspaceId) {
+      setShowProjectForm(true);
+      onActivity("Pick or create a project, then add the experiment inside it");
+    } else {
+      setShowWorkspaceForm(true);
+      onActivity("Create a workspace and project before adding an experiment");
+    }
+  }, [newExperimentNonce, onActivity, selectedProjectId, selectedWorkspaceId]);
+
   const selectedWorkspace = workspaces.find((workspace) => workspace.id === selectedWorkspaceId);
   const selectedProject = projects.find((project) => project.id === selectedProjectId);
   const selectedExperiment =
     experiments.find((experiment) => experiment.id === selectedExperimentId) ?? null;
 
+  function resolvedSubcategory(): string | null {
+    if (!categoryHasSubcategories) return null;
+    if (workspaceSubcategory === OTHER_SUBCATEGORY) {
+      return workspaceSubcategoryOther.trim() || null;
+    }
+    return workspaceSubcategory || null;
+  }
+
+  function resetWorkspaceForm() {
+    setWorkspaceName("");
+    setWorkspaceSubcategory("");
+    setWorkspaceSubcategoryOther("");
+    setShowWorkspaceForm(false);
+  }
+
   function submitWorkspace(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!workspaceName.trim() || !organizationId) return;
     createWorkspace.mutate(
-      { organizationId, name: workspaceName.trim(), category: workspaceCategory },
+      {
+        organizationId,
+        name: workspaceName.trim(),
+        category: workspaceCategory,
+        subcategory: resolvedSubcategory()
+      },
       {
         onSuccess: (workspace) => {
           onActivity(`Created workspace ${workspace.name}`);
           setSelectedWorkspaceId(workspace.id);
-          setWorkspaceName("");
-          setShowWorkspaceForm(false);
+          resetWorkspaceForm();
         },
         onError: (error) => onActivity(error instanceof Error ? error.message : "Failed to create workspace")
       }
@@ -160,6 +247,32 @@ export function LabView({
       }
     );
   }
+
+  function confirmDelete() {
+    if (!deleteTarget) return;
+    const { kind, id, name } = deleteTarget;
+    const done = (message: string) => {
+      onActivity(message);
+      setDeleteTarget(null);
+    };
+    const fail = (error: unknown) =>
+      onActivity(error instanceof Error ? error.message : `Failed to delete ${kind}`);
+    if (kind === "workspace") {
+      deleteWorkspace.mutate(id, { onSuccess: () => done(`Deleted workspace ${name}`), onError: fail });
+    } else if (kind === "project") {
+      deleteProject.mutate(id, { onSuccess: () => done(`Deleted project ${name}`), onError: fail });
+    } else {
+      deleteExperiment.mutate(id, {
+        onSuccess: () => {
+          if (selectedExperimentId === id) onSelectExperiment(undefined);
+          done(`Deleted experiment ${name}`);
+        },
+        onError: fail
+      });
+    }
+  }
+
+  const deleting = deleteWorkspace.isPending || deleteProject.isPending || deleteExperiment.isPending;
 
   return (
     <div className="mt-6 grid gap-4">
@@ -217,7 +330,15 @@ export function LabView({
                   active={workspace.id === selectedWorkspaceId}
                   onClick={() => setSelectedWorkspaceId(workspace.id)}
                   title={workspace.name}
-                  subtitle={categoryLabel(workspace.category)}
+                  subtitle={
+                    workspace.subcategory
+                      ? `${categoryLabel(workspace.category)} · ${workspace.subcategory}`
+                      : categoryLabel(workspace.category)
+                  }
+                  onDelete={() =>
+                    setDeleteTarget({ kind: "workspace", id: workspace.id, name: workspace.name })
+                  }
+                  deleteLabel="Delete workspace"
                 />
               ))
             )}
@@ -229,17 +350,48 @@ export function LabView({
                   placeholder="Workspace name"
                   className="rounded-md border border-black/10 bg-white px-2 py-1.5 text-sm outline-none focus:border-fern"
                 />
+                <label className="text-[11px] font-medium uppercase tracking-wide text-graphite">Category</label>
                 <select
                   value={workspaceCategory}
-                  onChange={(event) => setWorkspaceCategory(event.target.value as WorkspaceCategory)}
+                  onChange={(event) => {
+                    setWorkspaceCategory(event.target.value as WorkspaceCategory);
+                    setWorkspaceSubcategory("");
+                    setWorkspaceSubcategoryOther("");
+                  }}
                   className="rounded-md border border-black/10 bg-white px-2 py-1.5 text-sm outline-none focus:border-fern"
                 >
-                  {WORKSPACE_CATEGORIES.map((category) => (
-                    <option key={category} value={category}>
-                      {categoryLabel(category)}
+                  {CATEGORY_TAXONOMY.map((entry) => (
+                    <option key={entry.value} value={entry.value}>
+                      {entry.label}
                     </option>
                   ))}
                 </select>
+                {categoryHasSubcategories ? (
+                  <>
+                    <label className="text-[11px] font-medium uppercase tracking-wide text-graphite">Subcategory</label>
+                    <select
+                      value={workspaceSubcategory}
+                      onChange={(event) => setWorkspaceSubcategory(event.target.value)}
+                      className="rounded-md border border-black/10 bg-white px-2 py-1.5 text-sm outline-none focus:border-fern"
+                    >
+                      <option value="">Select subcategory…</option>
+                      {activeCategory?.subcategories.map((sub) => (
+                        <option key={sub} value={sub}>
+                          {sub}
+                        </option>
+                      ))}
+                      <option value={OTHER_SUBCATEGORY}>Other…</option>
+                    </select>
+                    {workspaceSubcategory === OTHER_SUBCATEGORY ? (
+                      <input
+                        value={workspaceSubcategoryOther}
+                        onChange={(event) => setWorkspaceSubcategoryOther(event.target.value)}
+                        placeholder="Custom subcategory"
+                        className="rounded-md border border-black/10 bg-white px-2 py-1.5 text-sm outline-none focus:border-fern"
+                      />
+                    ) : null}
+                  </>
+                ) : null}
                 <SubmitButton pending={createWorkspace.isPending} label="Create workspace" />
               </form>
             ) : null}
@@ -264,6 +416,8 @@ export function LabView({
                     onClick={() => setSelectedProjectId(project.id)}
                     title={project.name}
                     subtitle={project.status}
+                    onDelete={() => setDeleteTarget({ kind: "project", id: project.id, name: project.name })}
+                    deleteLabel="Delete project"
                   />
                 ))
               )}
@@ -300,6 +454,10 @@ export function LabView({
                     onClick={() => onSelectExperiment(experiment.id)}
                     title={experiment.title}
                     subtitle={`v${experiment.versionCount} · ${experiment.updated}`}
+                    onDelete={() =>
+                      setDeleteTarget({ kind: "experiment", id: experiment.id, name: experiment.title })
+                    }
+                    deleteLabel="Delete experiment"
                   />
                 ))
               )}
@@ -340,6 +498,63 @@ export function LabView({
           )}
         </div>
       </div>
+
+      {deleteTarget ? (
+        <ConfirmDeleteDialog
+          target={deleteTarget}
+          pending={deleting}
+          onCancel={() => setDeleteTarget(null)}
+          onConfirm={confirmDelete}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+function ConfirmDeleteDialog({
+  target,
+  pending,
+  onCancel,
+  onConfirm
+}: {
+  target: DeleteTarget;
+  pending: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  const cascade =
+    target.kind === "workspace"
+      ? "and every project, experiment, sample, and dataset inside it"
+      : target.kind === "project"
+        ? "and every experiment, sample, and dataset inside it"
+        : "and all its versions, samples, and datasets";
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4" role="dialog" aria-modal="true">
+      <div className="w-full max-w-md rounded-lg border border-black/10 bg-white p-5 shadow-xl">
+        <h3 className="text-sm font-semibold text-ink">Delete {target.kind}?</h3>
+        <p className="mt-2 text-sm text-graphite">
+          This permanently removes <span className="font-medium text-ink">{target.name}</span> {cascade}. This cannot be
+          undone.
+        </p>
+        <div className="mt-4 flex justify-end gap-2">
+          <button
+            onClick={onCancel}
+            disabled={pending}
+            className="rounded-md border border-black/10 px-3 py-1.5 text-sm font-medium hover:bg-black/5 disabled:cursor-not-allowed"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={onConfirm}
+            disabled={pending}
+            className="inline-flex items-center gap-2 rounded-md bg-red-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:bg-red-300"
+          >
+            {pending ? <LoaderCircle size={14} className="animate-spin" /> : <Trash2 size={14} />}
+            Delete
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -377,23 +592,41 @@ function ListButton({
   active,
   onClick,
   title,
-  subtitle
+  subtitle,
+  onDelete,
+  deleteLabel
 }: {
   active: boolean;
   onClick: () => void;
   title: string;
   subtitle?: string;
+  onDelete?: () => void;
+  deleteLabel?: string;
 }) {
   return (
-    <button
-      onClick={onClick}
-      className={`rounded-md border px-2.5 py-2 text-left transition ${
+    <div
+      className={`group flex items-center gap-1 rounded-md border pr-1 transition ${
         active ? "border-fern bg-[#edf5ef]" : "border-black/10 hover:bg-black/5"
       }`}
     >
-      <div className="truncate text-sm font-medium text-ink">{title}</div>
-      {subtitle ? <div className="mt-0.5 truncate text-[11px] text-graphite">{subtitle}</div> : null}
-    </button>
+      <button onClick={onClick} className="min-w-0 flex-1 px-2.5 py-2 text-left">
+        <div className="truncate text-sm font-medium text-ink">{title}</div>
+        {subtitle ? <div className="mt-0.5 truncate text-[11px] text-graphite">{subtitle}</div> : null}
+      </button>
+      {onDelete ? (
+        <button
+          onClick={(event) => {
+            event.stopPropagation();
+            onDelete();
+          }}
+          aria-label={deleteLabel}
+          title={deleteLabel}
+          className="rounded p-1.5 text-graphite/50 transition hover:bg-red-50 hover:text-red-600 focus:text-red-600 group-hover:text-graphite"
+        >
+          <Trash2 size={14} />
+        </button>
+      ) : null}
+    </div>
   );
 }
 

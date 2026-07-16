@@ -69,6 +69,14 @@ def get_workspace(
     return eln_service.get_workspace(workspace_id, actor=actor)
 
 
+@router.delete("/workspaces/{workspace_id}", status_code=204)
+def delete_workspace(
+    workspace_id: str, actor: Actor = Depends(get_current_actor)
+) -> None:
+    """Delete a workspace and everything nested beneath it."""
+    eln_service.delete_workspace(workspace_id, actor=actor)
+
+
 # --------------------------------------------------------------------------- #
 # Projects
 # --------------------------------------------------------------------------- #
@@ -106,6 +114,14 @@ def update_project(
     return eln_service.update_project(project_id, payload, actor=actor)
 
 
+@router.delete("/projects/{project_id}", status_code=204)
+def delete_project(
+    project_id: str, actor: Actor = Depends(get_current_actor)
+) -> None:
+    """Delete a project and every experiment (and below) inside it."""
+    eln_service.delete_project(project_id, actor=actor)
+
+
 # --------------------------------------------------------------------------- #
 # Experiments + versions
 # --------------------------------------------------------------------------- #
@@ -135,6 +151,14 @@ def get_experiment(
 ) -> Experiment:
     """Fetch an experiment by id."""
     return eln_service.get_experiment(experiment_id, actor=actor)
+
+
+@router.delete("/experiments/{experiment_id}", status_code=204)
+def delete_experiment(
+    experiment_id: str, actor: Actor = Depends(get_current_actor)
+) -> None:
+    """Delete an experiment and its versions, samples, and datasets."""
+    eln_service.delete_experiment(experiment_id, actor=actor)
 
 
 @router.post(

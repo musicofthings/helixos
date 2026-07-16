@@ -53,13 +53,16 @@ rejected with `422 invalid_update` rather than overwriting the record.
 | `GET` | `/api/v1/workspaces` | List workspaces (`organization_id` filter) |
 | `POST` | `/api/v1/workspaces/seed-defaults` | Seed default workspaces for an org (idempotent) |
 | `GET` | `/api/v1/workspaces/{workspace_id}` | Fetch a workspace |
+| `DELETE` | `/api/v1/workspaces/{workspace_id}` | Delete a workspace and its entire subtree (204) |
 | `POST` | `/api/v1/projects` | Create a project within a workspace |
 | `GET` | `/api/v1/projects` | List projects (`organization_id`, `workspace_id` filters) |
 | `GET` | `/api/v1/projects/{project_id}` | Fetch a project |
 | `PATCH` | `/api/v1/projects/{project_id}` | Update project name/description/status |
+| `DELETE` | `/api/v1/projects/{project_id}` | Delete a project and every experiment inside it (204) |
 | `POST` | `/api/v1/experiments` | Create an experiment + initial draft version |
 | `GET` | `/api/v1/experiments` | List experiments (`organization_id`, `project_id` filters) |
 | `GET` | `/api/v1/experiments/{experiment_id}` | Fetch an experiment (with HEAD version pointer) |
+| `DELETE` | `/api/v1/experiments/{experiment_id}` | Delete an experiment, its versions, samples, and datasets (204) |
 | `POST` | `/api/v1/experiments/{experiment_id}/versions` | Commit a new immutable version, advancing HEAD |
 | `GET` | `/api/v1/experiments/{experiment_id}/versions` | List version history |
 | `GET` | `/api/v1/experiments/{experiment_id}/versions/{version_id}` | Fetch a version |
@@ -97,7 +100,7 @@ The authenticated actor determines tenant visibility; clients cannot widen acces
 HelixOS organizes lab work as a hierarchy, each level tenant-scoped by `organization_id`:
 
 ```txt
-Workspace (category)          e.g. Molecular Biology
+Workspace (category + optional subcategory)   e.g. Next Generation Sequencing · RNA
   └─ Project                  e.g. Reporter plasmid program
        └─ Experiment          the "repo" — tracks a HEAD version
             ├─ ExperimentVersion  immutable snapshot ("commit"); new edits create a new version
@@ -108,6 +111,31 @@ Workspace (category)          e.g. Molecular Biology
 Experiments are versioned like source control: `POST /experiments/{id}/versions` creates a
 new immutable `ExperimentVersion` with a `parent_version_id` and commit `message`, and moves
 the experiment's `head_version_id` forward. Signed versions are read-only.
+
+Workspaces carry a `category` and an optional free-string `subcategory` refining it. Categories
+with suggested subcategories:
+
+- `next_gen_sequencing` → DNA, RNA, Protein
+- `digital_pathology` → Cells, Tissues
+- `programmable_bio` → Single-cell experiments, PerturbGen, Protein-protein interaction studies (extensible)
+
+`molecular_biology`, `biochemistry`, and `microbiology` carry no subcategory. Suggested
+subcategory values are advisory only; the API accepts any string so labs can extend the lists.
+
+`DELETE` on a workspace, project, or experiment cascades to everything nested beneath it in a
+single transaction and returns `204`. Each deletion records an audit event
+(`eln.workspace_deleted` / `eln.project_deleted` / `eln.experiment_deleted`).
+
+## Example Workspace Create
+
+```json
+{
+  "organization_id": "org_demo",
+  "name": "Sequencing core",
+  "category": "next_gen_sequencing",
+  "subcategory": "RNA"
+}
+```
 
 ## Example Experiment Create
 

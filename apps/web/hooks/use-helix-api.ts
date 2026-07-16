@@ -116,16 +116,54 @@ export function useCreateWorkspace(organizationId?: string) {
       organizationId: string;
       name: string;
       category: WorkspaceCategory;
+      subcategory?: string | null;
       description?: string;
     }) =>
       createHelixClient().createWorkspace({
         organization_id: input.organizationId,
         name: input.name,
         category: input.category,
+        subcategory: input.subcategory ?? null,
         description: input.description
       }),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ["workspaces", organizationId] });
+      await invalidateAuditEvents(queryClient, organizationId);
+    }
+  });
+}
+
+export function useDeleteWorkspace(organizationId?: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (workspaceId: string) => createHelixClient().deleteWorkspace(workspaceId),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["workspaces", organizationId] });
+      await queryClient.invalidateQueries({ queryKey: ["projects"] });
+      await queryClient.invalidateQueries({ queryKey: ["experiments"] });
+      await invalidateAuditEvents(queryClient, organizationId);
+    }
+  });
+}
+
+export function useDeleteProject(organizationId?: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (projectId: string) => createHelixClient().deleteProject(projectId),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["projects"] });
+      await queryClient.invalidateQueries({ queryKey: ["experiments"] });
+      await invalidateAuditEvents(queryClient, organizationId);
+    }
+  });
+}
+
+export function useDeleteExperiment(organizationId?: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (experimentId: string) => createHelixClient().deleteExperiment(experimentId),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["experiments"] });
       await invalidateAuditEvents(queryClient, organizationId);
     }
   });

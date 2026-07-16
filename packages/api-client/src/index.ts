@@ -113,6 +113,10 @@ export class HelixOSClient {
     });
   }
 
+  deleteWorkspace(workspaceId: string): Promise<void> {
+    return this.request(`/api/v1/workspaces/${encodeURIComponent(workspaceId)}`, { method: "DELETE" });
+  }
+
   // --- Projects ----------------------------------------------------------- //
   listProjects(params?: { organizationId?: string; workspaceId?: string }): Promise<Project[]> {
     const search = new URLSearchParams();
@@ -133,6 +137,10 @@ export class HelixOSClient {
     });
   }
 
+  deleteProject(projectId: string): Promise<void> {
+    return this.request(`/api/v1/projects/${encodeURIComponent(projectId)}`, { method: "DELETE" });
+  }
+
   // --- Experiments + versions -------------------------------------------- //
   listExperiments(params?: { organizationId?: string; projectId?: string }): Promise<Experiment[]> {
     const search = new URLSearchParams();
@@ -151,6 +159,10 @@ export class HelixOSClient {
 
   getExperiment(experimentId: string): Promise<Experiment> {
     return this.request(`/api/v1/experiments/${encodeURIComponent(experimentId)}`);
+  }
+
+  deleteExperiment(experimentId: string): Promise<void> {
+    return this.request(`/api/v1/experiments/${encodeURIComponent(experimentId)}`, { method: "DELETE" });
   }
 
   listExperimentVersions(experimentId: string): Promise<ExperimentVersion[]> {

@@ -10,7 +10,22 @@
     "name": { "type": "string", "minLength": 1 },
     "category": {
       "type": "string",
-      "enum": ["molecular_biology", "biochemistry", "microbiology", "genomics", "cell_biology", "custom"]
+      "enum": [
+        "molecular_biology",
+        "biochemistry",
+        "microbiology",
+        "next_gen_sequencing",
+        "digital_pathology",
+        "programmable_bio",
+        "genomics",
+        "cell_biology",
+        "custom"
+      ]
+    },
+    "subcategory": {
+      "type": ["string", "null"],
+      "maxLength": 64,
+      "description": "Optional refinement of the category (e.g. DNA/RNA/Protein for next_gen_sequencing). Free string; suggested values are advisory."
     },
     "description": { "type": ["string", "null"] },
     "is_default": { "type": "boolean" },

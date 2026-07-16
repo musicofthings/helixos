@@ -19,6 +19,9 @@ export type WorkspaceCategory =
   | "molecular_biology"
   | "biochemistry"
   | "microbiology"
+  | "next_gen_sequencing"
+  | "digital_pathology"
+  | "programmable_bio"
   | "genomics"
   | "cell_biology"
   | "custom";
@@ -28,6 +31,7 @@ export interface Workspace {
   organization_id: string;
   name: string;
   category: WorkspaceCategory;
+  subcategory?: string | null;
   description?: string | null;
   is_default: boolean;
   created_at: string;
@@ -38,6 +42,7 @@ export interface WorkspaceCreate {
   organization_id: string;
   name: string;
   category?: WorkspaceCategory;
+  subcategory?: string | null;
   description?: string | null;
 }
 

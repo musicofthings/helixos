@@ -57,6 +57,160 @@ def test_seed_default_workspaces_is_idempotent(client: TestClient) -> None:
 
 
 @pytest.mark.parametrize("client", CLIENT_FIXTURES, indirect=True)
+def test_workspace_stores_category_and_subcategory(client: TestClient) -> None:
+    workspace = client.post(
+        "/api/v1/workspaces",
+        headers=ORG_DEMO_HEADERS,
+        json={
+            "organization_id": "org_demo",
+            "name": "Sequencing core",
+            "category": "next_gen_sequencing",
+            "subcategory": "RNA",
+        },
+    )
+    assert workspace.status_code == 201, workspace.text
+    body = workspace.json()
+    assert body["category"] == "next_gen_sequencing"
+    assert body["subcategory"] == "RNA"
+
+    # Round-trips through the store (matters for the SQLite backend + migration).
+    listed = client.get(
+        "/api/v1/workspaces?organization_id=org_demo", headers=ORG_DEMO_HEADERS
+    ).json()
+    assert any(
+        ws["id"] == body["id"] and ws["subcategory"] == "RNA" for ws in listed
+    )
+
+
+@pytest.mark.parametrize("client", CLIENT_FIXTURES, indirect=True)
+def test_delete_workspace_cascades_the_whole_subtree(client: TestClient) -> None:
+    workspace = client.post(
+        "/api/v1/workspaces",
+        headers=ORG_DEMO_HEADERS,
+        json={"organization_id": "org_demo", "name": "Doomed", "category": "custom"},
+    ).json()
+    project = client.post(
+        "/api/v1/projects",
+        headers=ORG_DEMO_HEADERS,
+        json={
+            "organization_id": "org_demo",
+            "workspace_id": workspace["id"],
+            "name": "P",
+        },
+    ).json()
+    experiment = _create_experiment(client, project_id=project["id"])
+    sample = client.post(
+        "/api/v1/samples",
+        headers=ORG_DEMO_HEADERS,
+        json={
+            "organization_id": "org_demo",
+            "experiment_id": experiment["id"],
+            "name": "S1",
+            "sample_type": "dna",
+        },
+    ).json()
+    client.post(
+        "/api/v1/datasets",
+        headers=ORG_DEMO_HEADERS,
+        json={
+            "organization_id": "org_demo",
+            "sample_id": sample["id"],
+            "name": "read",
+            "dataset_type": "dna_sequence",
+        },
+    )
+
+    deleted = client.delete(
+        f"/api/v1/workspaces/{workspace['id']}", headers=ORG_DEMO_HEADERS
+    )
+    assert deleted.status_code == 204
+
+    assert (
+        client.get(
+            f"/api/v1/workspaces/{workspace['id']}", headers=ORG_DEMO_HEADERS
+        ).status_code
+        == 404
+    )
+    assert (
+        client.get(
+            f"/api/v1/projects/{project['id']}", headers=ORG_DEMO_HEADERS
+        ).status_code
+        == 404
+    )
+    assert (
+        client.get(
+            f"/api/v1/experiments/{experiment['id']}", headers=ORG_DEMO_HEADERS
+        ).status_code
+        == 404
+    )
+    assert (
+        client.get(
+            f"/api/v1/samples/{sample['id']}", headers=ORG_DEMO_HEADERS
+        ).status_code
+        == 404
+    )
+
+
+@pytest.mark.parametrize("client", CLIENT_FIXTURES, indirect=True)
+def test_delete_project_leaves_workspace_intact(client: TestClient) -> None:
+    workspace = client.post(
+        "/api/v1/workspaces",
+        headers=ORG_DEMO_HEADERS,
+        json={"organization_id": "org_demo", "name": "Keep", "category": "custom"},
+    ).json()
+    project = client.post(
+        "/api/v1/projects",
+        headers=ORG_DEMO_HEADERS,
+        json={
+            "organization_id": "org_demo",
+            "workspace_id": workspace["id"],
+            "name": "Drop",
+        },
+    ).json()
+    experiment = _create_experiment(client, project_id=project["id"])
+
+    assert (
+        client.delete(
+            f"/api/v1/projects/{project['id']}", headers=ORG_DEMO_HEADERS
+        ).status_code
+        == 204
+    )
+    assert (
+        client.get(
+            f"/api/v1/experiments/{experiment['id']}", headers=ORG_DEMO_HEADERS
+        ).status_code
+        == 404
+    )
+    # Workspace survives its project's deletion.
+    assert (
+        client.get(
+            f"/api/v1/workspaces/{workspace['id']}", headers=ORG_DEMO_HEADERS
+        ).status_code
+        == 200
+    )
+
+
+@pytest.mark.parametrize("client", CLIENT_FIXTURES, indirect=True)
+def test_cross_tenant_delete_is_blocked(client: TestClient) -> None:
+    workspace = client.post(
+        "/api/v1/workspaces",
+        headers=ADMIN_HEADERS,
+        json={"organization_id": "org_qc", "name": "QC WS", "category": "custom"},
+    ).json()
+    forbidden = client.delete(
+        f"/api/v1/workspaces/{workspace['id']}", headers=ORG_DEMO_HEADERS
+    )
+    assert forbidden.status_code == 403
+    # Still there for the tenant that owns it.
+    assert (
+        client.get(
+            f"/api/v1/workspaces/{workspace['id']}", headers=ADMIN_HEADERS
+        ).status_code
+        == 200
+    )
+
+
+@pytest.mark.parametrize("client", CLIENT_FIXTURES, indirect=True)
 def test_full_hierarchy_create_and_read(client: TestClient) -> None:
     workspace = client.post(
         "/api/v1/workspaces",

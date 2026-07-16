@@ -3,9 +3,10 @@
 from collections.abc import Iterator
 from contextlib import contextmanager
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.schema import Table
 
 from helixos.db.base import Base
 from helixos.db.settings import DatabaseSettings, get_database_settings
@@ -51,6 +52,34 @@ def init_db(settings: DatabaseSettings | None = None) -> None:
     engine = get_engine(settings)
     if engine is not None:
         Base.metadata.create_all(engine)
+        _apply_additive_migrations(engine)
+
+
+def _apply_additive_migrations(engine: Engine) -> None:
+    """Add newly-declared nullable columns to already-created tables.
+
+    ``create_all`` only creates missing tables; it never alters existing ones.
+    This project has no migration framework, so for backward-compatible additions
+    (nullable columns) we detect and add them explicitly here. Non-nullable
+    additions are skipped — those need a real migration to backfill existing rows.
+    """
+    inspector = inspect(engine)
+    existing_tables = set(inspector.get_table_names())
+    for table in Base.metadata.tables.values():
+        if not isinstance(table, Table) or table.name not in existing_tables:
+            continue
+        present = {col["name"] for col in inspector.get_columns(table.name)}
+        for column in table.columns:
+            if column.name in present or not column.nullable:
+                continue
+            column_type = column.type.compile(dialect=engine.dialect)
+            with engine.begin() as connection:
+                connection.execute(
+                    text(
+                        f'ALTER TABLE "{table.name}" '
+                        f'ADD COLUMN "{column.name}" {column_type}'
+                    )
+                )
 
 
 @contextmanager
