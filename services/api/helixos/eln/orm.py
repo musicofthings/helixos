@@ -2,7 +2,7 @@
 
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Index, String, Text, UniqueConstraint
+from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.types import JSON
 
@@ -26,6 +26,62 @@ class WorkspaceORM(Base):
         DateTime(timezone=True), nullable=False
     )
     updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+
+
+class WorkspaceShareORM(Base):
+    """Same-org collaborator grant on a workspace."""
+
+    __tablename__ = "eln_workspace_shares"
+    __table_args__ = (
+        UniqueConstraint(
+            "workspace_id", "subject", name="uq_eln_workspace_share_subject"
+        ),
+        Index("ix_eln_workspace_shares_workspace", "workspace_id"),
+        Index("ix_eln_workspace_shares_org", "organization_id"),
+    )
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    workspace_id: Mapped[str] = mapped_column(
+        String(64), ForeignKey("eln_workspaces.id"), nullable=False
+    )
+    organization_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    subject: Mapped[str] = mapped_column(String(128), nullable=False)
+    role: Mapped[str] = mapped_column(String(16), nullable=False)
+    granted_by: Mapped[str] = mapped_column(String(128), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+
+
+class WorkspaceInviteORM(Base):
+    """Invite link for a workspace."""
+
+    __tablename__ = "eln_workspace_invites"
+    __table_args__ = (
+        UniqueConstraint("token", name="uq_eln_workspace_invite_token"),
+        Index("ix_eln_workspace_invites_workspace", "workspace_id"),
+        Index("ix_eln_workspace_invites_org", "organization_id"),
+    )
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    workspace_id: Mapped[str] = mapped_column(
+        String(64), ForeignKey("eln_workspaces.id"), nullable=False
+    )
+    organization_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    token: Mapped[str] = mapped_column(String(64), nullable=False)
+    role: Mapped[str] = mapped_column(String(16), nullable=False)
+    created_by: Mapped[str] = mapped_column(String(128), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    revoked_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    accepted_count: Mapped[int] = mapped_column(default=0, nullable=False)
+    max_uses: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
     )
 

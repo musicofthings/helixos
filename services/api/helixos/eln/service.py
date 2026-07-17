@@ -7,11 +7,13 @@ scoped and recorded to the audit trail.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+import re
+from datetime import datetime, timedelta, timezone
+from typing import Literal
 
 from helixos.audit.service import audit_service
 from helixos.auth.schemas import Actor
-from helixos.auth.service import organization_service
+from helixos.auth.service import DEMO_TOKENS, organization_service
 from helixos.db.settings import DatabaseSettings, get_database_settings
 from helixos.eln.memory_store import MemoryElnStore
 from helixos.eln.schemas import (
@@ -33,10 +35,34 @@ from helixos.eln.schemas import (
     Workspace,
     WorkspaceCategory,
     WorkspaceCreate,
+    WorkspaceInvite,
+    WorkspaceInviteCreate,
+    WorkspaceShare,
+    WorkspaceShareCreate,
+    WorkspaceShareRole,
+    WorkspaceShareUpdate,
     normalize_well_position,
 )
 from helixos.eln.stores import ElnStore, PlateFullError, WellOccupiedError
 from helixos.errors import api_error
+
+WorkspaceAccess = Literal["owner", "editor", "viewer"]
+
+_ACCESS_RANK: dict[WorkspaceAccess, int] = {
+    "viewer": 1,
+    "editor": 2,
+    "owner": 3,
+}
+_KNOWN_SUBJECTS = {actor.subject for actor in DEMO_TOKENS.values()}
+_EMAIL_SUBJECT = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+
+def _coerce_access(
+    role: WorkspaceShareRole | Literal["owner"],
+) -> WorkspaceAccess:
+    if role == "owner":
+        return "owner"
+    return role.value
 
 _ALLOWED_STATUS_TRANSITIONS: frozenset[tuple[ExperimentStatus, ExperimentStatus]] = (
     frozenset(
@@ -142,19 +168,35 @@ class ElnService:
     def list_workspaces(
         self, actor: Actor, organization_id: str | None = None
     ) -> list[Workspace]:
-        organization_ids = self._visible_org_ids(actor, organization_id)
-        return self._store.list_workspaces(organization_ids)
+        by_id: dict[str, Workspace] = {}
+        if organization_id is not None:
+            if organization_id in actor.organization_ids:
+                for workspace in self._store.list_workspaces([organization_id]):
+                    by_id[workspace.id] = workspace
+            for share in self._store.list_shares_for_subject(actor.subject):
+                workspace = self._store.get_workspace(share.workspace_id)
+                if workspace is not None and workspace.organization_id == organization_id:
+                    by_id[workspace.id] = workspace
+            if not by_id and organization_id not in actor.organization_ids:
+                organization_service.require_access(actor, organization_id)
+        else:
+            if actor.organization_ids:
+                for workspace in self._store.list_workspaces(actor.organization_ids):
+                    by_id[workspace.id] = workspace
+            for share in self._store.list_shares_for_subject(actor.subject):
+                workspace = self._store.get_workspace(share.workspace_id)
+                if workspace is not None:
+                    by_id[workspace.id] = workspace
+        return sorted(by_id.values(), key=lambda item: item.created_at)
 
     def get_workspace(self, workspace_id: str, actor: Actor) -> Workspace:
-        workspace = self._store.get_workspace(workspace_id)
-        if workspace is None:
-            raise _not_found("workspace", workspace_id)
-        organization_service.require_access(actor, workspace.organization_id)
-        return workspace
+        return self.require_workspace_role(
+            workspace_id, actor, WorkspaceShareRole.VIEWER
+        )
 
     def delete_workspace(self, workspace_id: str, actor: Actor) -> None:
         """Delete a workspace and everything nested beneath it."""
-        workspace = self.get_workspace(workspace_id, actor)
+        workspace = self.require_workspace_role(workspace_id, actor, "owner")
         self._store.delete_workspace(workspace_id)
         audit_service.record(
             organization_id=workspace.organization_id,
@@ -166,12 +208,189 @@ class ElnService:
         )
 
     # ----------------------------------------------------------------- #
+    # Workspace collaboration
+    # ----------------------------------------------------------------- #
+    def list_collaboration(
+        self, workspace_id: str, actor: Actor
+    ) -> tuple[list[WorkspaceShare], list[WorkspaceInvite]]:
+        self.require_workspace_role(workspace_id, actor, "owner")
+        invites = [
+            self._redact_invite_token(invite)
+            for invite in self._store.list_invites(workspace_id)
+        ]
+        return self._store.list_shares(workspace_id), invites
+
+    def create_share(
+        self, workspace_id: str, payload: WorkspaceShareCreate, actor: Actor
+    ) -> WorkspaceShare:
+        workspace = self.require_workspace_role(workspace_id, actor, "owner")
+        subject = self._validate_share_subject(payload.subject)
+        existing = self._store.find_share(workspace_id, subject)
+        if existing is not None:
+            raise api_error(
+                status_code=409,
+                code="share_exists",
+                message="This subject already has a share on this workspace",
+                details={"share_id": existing.id, "subject": existing.subject},
+            )
+        share = WorkspaceShare(
+            workspace_id=workspace_id,
+            organization_id=workspace.organization_id,
+            subject=subject,
+            role=payload.role,
+            granted_by=actor.subject,
+        )
+        self._store.create_share(share)
+        audit_service.record(
+            organization_id=workspace.organization_id,
+            actor=actor,
+            event_type="eln.workspace_share_granted",
+            resource_type="workspace_share",
+            resource_id=share.id,
+            payload={
+                "workspace_id": workspace_id,
+                "subject": share.subject,
+                "role": share.role.value,
+            },
+        )
+        return share
+
+    def update_share(
+        self,
+        workspace_id: str,
+        share_id: str,
+        payload: WorkspaceShareUpdate,
+        actor: Actor,
+    ) -> WorkspaceShare:
+        workspace = self.require_workspace_role(workspace_id, actor, "owner")
+        share = self._store.get_share(share_id)
+        if share is None or share.workspace_id != workspace_id:
+            raise _not_found("workspace_share", share_id)
+        updated = share.model_copy(update={"role": payload.role})
+        self._store.update_share(updated)
+        audit_service.record(
+            organization_id=workspace.organization_id,
+            actor=actor,
+            event_type="eln.workspace_share_updated",
+            resource_type="workspace_share",
+            resource_id=share_id,
+            payload={
+                "workspace_id": workspace_id,
+                "subject": updated.subject,
+                "role": updated.role.value,
+            },
+        )
+        return updated
+
+    def revoke_share(self, workspace_id: str, share_id: str, actor: Actor) -> None:
+        workspace = self.require_workspace_role(workspace_id, actor, "owner")
+        share = self._store.get_share(share_id)
+        if share is None or share.workspace_id != workspace_id:
+            raise _not_found("workspace_share", share_id)
+        self._store.delete_share(share_id)
+        audit_service.record(
+            organization_id=workspace.organization_id,
+            actor=actor,
+            event_type="eln.workspace_share_revoked",
+            resource_type="workspace_share",
+            resource_id=share_id,
+            payload={"workspace_id": workspace_id, "subject": share.subject},
+        )
+
+    def create_invite(
+        self, workspace_id: str, payload: WorkspaceInviteCreate, actor: Actor
+    ) -> WorkspaceInvite:
+        workspace = self.require_workspace_role(workspace_id, actor, "owner")
+        invite = WorkspaceInvite(
+            workspace_id=workspace_id,
+            organization_id=workspace.organization_id,
+            role=payload.role,
+            created_by=actor.subject,
+            expires_at=_now() + timedelta(hours=payload.expires_in_hours),
+            max_uses=payload.max_uses,
+        )
+        self._store.create_invite(invite)
+        audit_service.record(
+            organization_id=workspace.organization_id,
+            actor=actor,
+            event_type="eln.workspace_invite_created",
+            resource_type="workspace_invite",
+            resource_id=invite.id,
+            payload={
+                "workspace_id": workspace_id,
+                "role": invite.role.value,
+                "expires_at": invite.expires_at.isoformat(),
+                "max_uses": invite.max_uses,
+            },
+        )
+        return invite
+
+    def revoke_invite(self, workspace_id: str, invite_id: str, actor: Actor) -> None:
+        workspace = self.require_workspace_role(workspace_id, actor, "owner")
+        invite = self._store.get_invite(invite_id)
+        if invite is None or invite.workspace_id != workspace_id:
+            raise _not_found("workspace_invite", invite_id)
+        if invite.revoked_at is not None:
+            return
+        updated = invite.model_copy(update={"revoked_at": _now()})
+        self._store.update_invite(updated)
+        audit_service.record(
+            organization_id=workspace.organization_id,
+            actor=actor,
+            event_type="eln.workspace_invite_revoked",
+            resource_type="workspace_invite",
+            resource_id=invite_id,
+            payload={"workspace_id": workspace_id},
+        )
+
+    def accept_invite(self, token: str, actor: Actor) -> WorkspaceShare:
+        invite = self._store.get_invite_by_token(token)
+        if invite is None:
+            raise _not_found("workspace_invite", token)
+        if not invite.is_active:
+            raise api_error(
+                status_code=410,
+                code="invite_inactive",
+                message="This invite has expired, been revoked, or reached its use limit",
+                details={"invite_id": invite.id},
+            )
+        existing = self._store.find_share(invite.workspace_id, actor.subject)
+        if existing is not None:
+            self._store.accept_invite(invite, None)
+            return existing
+
+        share = WorkspaceShare(
+            workspace_id=invite.workspace_id,
+            organization_id=invite.organization_id,
+            subject=actor.subject,
+            role=invite.role,
+            granted_by=invite.created_by,
+        )
+        self._store.accept_invite(invite, share)
+        # Acceptors may not yet belong to the workspace org; record without
+        # an org-membership check so shared-with-me onboarding can succeed.
+        audit_service.record_system(
+            organization_id=invite.organization_id,
+            actor_subject=actor.subject,
+            event_type="eln.workspace_invite_accepted",
+            resource_type="workspace_invite",
+            resource_id=invite.id,
+            payload={
+                "workspace_id": invite.workspace_id,
+                "share_id": share.id,
+                "role": share.role.value,
+            },
+        )
+        return share
+
+    # ----------------------------------------------------------------- #
     # Projects
     # ----------------------------------------------------------------- #
     def create_project(self, payload: ProjectCreate, actor: Actor) -> Project:
-        organization_service.require_access(actor, payload.organization_id)
-        workspace = self._store.get_workspace(payload.workspace_id)
-        if workspace is None or workspace.organization_id != payload.organization_id:
+        workspace = self.require_workspace_role(
+            payload.workspace_id, actor, WorkspaceShareRole.EDITOR
+        )
+        if workspace.organization_id != payload.organization_id:
             raise _not_found("workspace", payload.workspace_id)
         project = Project(**payload.model_dump())
         self._store.create_project(project)
@@ -191,20 +410,61 @@ class ElnService:
         organization_id: str | None = None,
         workspace_id: str | None = None,
     ) -> list[Project]:
-        organization_ids = self._visible_org_ids(actor, organization_id)
-        return self._store.list_projects(organization_ids, workspace_id=workspace_id)
+        if workspace_id is not None:
+            workspace = self.require_workspace_role(
+                workspace_id, actor, WorkspaceShareRole.VIEWER
+            )
+            return self._store.list_projects(
+                [workspace.organization_id], workspace_id=workspace_id
+            )
+
+        by_id: dict[str, Project] = {}
+        if organization_id is not None:
+            if organization_id in actor.organization_ids:
+                for project in self._store.list_projects([organization_id]):
+                    by_id[project.id] = project
+            for share in self._store.list_shares_for_subject(actor.subject):
+                workspace = self._store.get_workspace(share.workspace_id)
+                if workspace is None or workspace.organization_id != organization_id:
+                    continue
+                for project in self._store.list_projects(
+                    [organization_id], workspace_id=workspace.id
+                ):
+                    by_id[project.id] = project
+            if not by_id and organization_id not in actor.organization_ids:
+                organization_service.require_access(actor, organization_id)
+        else:
+            if actor.organization_ids:
+                for project in self._store.list_projects(actor.organization_ids):
+                    by_id[project.id] = project
+            for share in self._store.list_shares_for_subject(actor.subject):
+                workspace = self._store.get_workspace(share.workspace_id)
+                if workspace is None or workspace.organization_id in actor.organization_ids:
+                    continue
+                for project in self._store.list_projects(
+                    [workspace.organization_id], workspace_id=workspace.id
+                ):
+                    by_id[project.id] = project
+        return sorted(by_id.values(), key=lambda item: item.created_at)
 
     def get_project(self, project_id: str, actor: Actor) -> Project:
         project = self._store.get_project(project_id)
         if project is None:
             raise _not_found("project", project_id)
-        organization_service.require_access(actor, project.organization_id)
+        self.require_workspace_role(
+            project.workspace_id, actor, WorkspaceShareRole.VIEWER
+        )
         return project
 
     def update_project(
         self, project_id: str, payload: ProjectUpdate, actor: Actor
     ) -> Project:
-        project = self.get_project(project_id, actor)
+        project = self._store.get_project(project_id)
+        if project is None:
+            raise _not_found("project", project_id)
+        self.require_workspace_role(
+            project.workspace_id, actor, WorkspaceShareRole.EDITOR
+        )
         updates = payload.model_dump(exclude_unset=True)
         _reject_null_updates(updates, _PROJECT_REQUIRED_FIELDS)
         if not updates:
@@ -223,7 +483,12 @@ class ElnService:
 
     def delete_project(self, project_id: str, actor: Actor) -> None:
         """Delete a project and every experiment (and below) inside it."""
-        project = self.get_project(project_id, actor)
+        project = self._store.get_project(project_id)
+        if project is None:
+            raise _not_found("project", project_id)
+        self.require_workspace_role(
+            project.workspace_id, actor, WorkspaceShareRole.EDITOR
+        )
         self._store.delete_project(project_id)
         audit_service.record(
             organization_id=project.organization_id,
@@ -239,11 +504,16 @@ class ElnService:
     # ----------------------------------------------------------------- #
     def create_experiment(self, payload: ExperimentCreate, actor: Actor) -> Experiment:
         """Create an experiment and its initial draft version (v1)."""
-        organization_service.require_access(actor, payload.organization_id)
         if payload.project_id is not None:
             project = self._store.get_project(payload.project_id)
             if project is None or project.organization_id != payload.organization_id:
                 raise _not_found("project", payload.project_id)
+            self.require_workspace_role(
+                project.workspace_id, actor, WorkspaceShareRole.EDITOR
+            )
+        else:
+            # Legacy unscoped experiments: org membership required.
+            organization_service.require_access(actor, payload.organization_id)
 
         experiment = Experiment(
             organization_id=payload.organization_id,
@@ -283,19 +553,64 @@ class ElnService:
         organization_id: str | None = None,
         project_id: str | None = None,
     ) -> list[Experiment]:
-        organization_ids = self._visible_org_ids(actor, organization_id)
-        return self._store.list_experiments(organization_ids, project_id=project_id)
+        if project_id is not None:
+            project = self.get_project(project_id, actor)
+            return self._store.list_experiments(
+                [project.organization_id], project_id=project_id
+            )
+
+        by_id: dict[str, Experiment] = {}
+        if organization_id is not None:
+            if organization_id in actor.organization_ids:
+                for experiment in self._store.list_experiments([organization_id]):
+                    by_id[experiment.id] = experiment
+            for share in self._store.list_shares_for_subject(actor.subject):
+                workspace = self._store.get_workspace(share.workspace_id)
+                if workspace is None or workspace.organization_id != organization_id:
+                    continue
+                for project in self._store.list_projects(
+                    [organization_id], workspace_id=workspace.id
+                ):
+                    for experiment in self._store.list_experiments(
+                        [organization_id], project_id=project.id
+                    ):
+                        by_id[experiment.id] = experiment
+            if not by_id and organization_id not in actor.organization_ids:
+                organization_service.require_access(actor, organization_id)
+        else:
+            if actor.organization_ids:
+                for experiment in self._store.list_experiments(actor.organization_ids):
+                    by_id[experiment.id] = experiment
+            for share in self._store.list_shares_for_subject(actor.subject):
+                workspace = self._store.get_workspace(share.workspace_id)
+                if workspace is None or workspace.organization_id in actor.organization_ids:
+                    continue
+                for project in self._store.list_projects(
+                    [workspace.organization_id], workspace_id=workspace.id
+                ):
+                    for experiment in self._store.list_experiments(
+                        [workspace.organization_id], project_id=project.id
+                    ):
+                        by_id[experiment.id] = experiment
+        return sorted(by_id.values(), key=lambda item: item.created_at)
 
     def get_experiment(self, experiment_id: str, actor: Actor) -> Experiment:
         experiment = self._store.get_experiment(experiment_id)
         if experiment is None:
             raise _not_found("experiment", experiment_id)
-        organization_service.require_access(actor, experiment.organization_id)
+        self._require_experiment_role(
+            experiment, actor, WorkspaceShareRole.VIEWER
+        )
         return experiment
 
     def delete_experiment(self, experiment_id: str, actor: Actor) -> None:
         """Delete an experiment and its versions, samples, and datasets."""
-        experiment = self.get_experiment(experiment_id, actor)
+        experiment = self._store.get_experiment(experiment_id)
+        if experiment is None:
+            raise _not_found("experiment", experiment_id)
+        self._require_experiment_role(
+            experiment, actor, WorkspaceShareRole.EDITOR
+        )
         self._store.delete_experiment(experiment_id)
         audit_service.record(
             organization_id=experiment.organization_id,
@@ -310,7 +625,12 @@ class ElnService:
         self, experiment_id: str, payload: ExperimentVersionCreate, actor: Actor
     ) -> ExperimentVersion:
         """Create a new immutable version snapshot, advancing HEAD."""
-        experiment = self.get_experiment(experiment_id, actor)
+        experiment = self._store.get_experiment(experiment_id)
+        if experiment is None:
+            raise _not_found("experiment", experiment_id)
+        self._require_experiment_role(
+            experiment, actor, WorkspaceShareRole.EDITOR
+        )
         parent_id = payload.parent_version_id or experiment.head_version_id
         if parent_id is not None:
             parent = self._store.get_version(parent_id)
@@ -370,7 +690,15 @@ class ElnService:
         actor: Actor,
     ) -> ExperimentVersion:
         """Transition a version's lifecycle status (draft -> in_review -> signed)."""
-        version = self.get_version(experiment_id, version_id, actor)
+        experiment = self._store.get_experiment(experiment_id)
+        if experiment is None:
+            raise _not_found("experiment", experiment_id)
+        self._require_experiment_role(
+            experiment, actor, WorkspaceShareRole.EDITOR
+        )
+        version = self._store.get_version(version_id)
+        if version is None or version.experiment_id != experiment_id:
+            raise _not_found("experiment_version", version_id)
         if version.status == ExperimentStatus.SIGNED:
             raise api_error(
                 status_code=409,
@@ -406,10 +734,12 @@ class ElnService:
     # Samples
     # ----------------------------------------------------------------- #
     def create_sample(self, payload: SampleCreate, actor: Actor) -> Sample:
-        organization_service.require_access(actor, payload.organization_id)
         experiment = self._store.get_experiment(payload.experiment_id)
         if experiment is None or experiment.organization_id != payload.organization_id:
             raise _not_found("experiment", payload.experiment_id)
+        self._require_experiment_role(
+            experiment, actor, WorkspaceShareRole.EDITOR
+        )
 
         well = self._normalize_well(payload.well_position)
         sample = Sample(**{**payload.model_dump(), "well_position": well})
@@ -462,13 +792,26 @@ class ElnService:
         sample = self._store.get_sample(sample_id)
         if sample is None:
             raise _not_found("sample", sample_id)
-        organization_service.require_access(actor, sample.organization_id)
+        experiment = self._store.get_experiment(sample.experiment_id)
+        if experiment is None:
+            raise _not_found("experiment", sample.experiment_id)
+        self._require_experiment_role(
+            experiment, actor, WorkspaceShareRole.VIEWER
+        )
         return sample
 
     def update_sample(
         self, sample_id: str, payload: SampleUpdate, actor: Actor
     ) -> Sample:
-        sample = self.get_sample(sample_id, actor)
+        sample = self._store.get_sample(sample_id)
+        if sample is None:
+            raise _not_found("sample", sample_id)
+        experiment = self._store.get_experiment(sample.experiment_id)
+        if experiment is None:
+            raise _not_found("experiment", sample.experiment_id)
+        self._require_experiment_role(
+            experiment, actor, WorkspaceShareRole.EDITOR
+        )
         updates = payload.model_dump(exclude_unset=True)
         _reject_null_updates(updates, _SAMPLE_REQUIRED_FIELDS)
         if "well_position" in updates:
@@ -491,14 +834,44 @@ class ElnService:
         )
         return updated
 
+    def delete_sample(self, sample_id: str, actor: Actor) -> None:
+        """Delete a sample and every dataset attached to it."""
+        sample = self._store.get_sample(sample_id)
+        if sample is None:
+            raise _not_found("sample", sample_id)
+        experiment = self._store.get_experiment(sample.experiment_id)
+        if experiment is None:
+            raise _not_found("experiment", sample.experiment_id)
+        self._require_experiment_role(
+            experiment, actor, WorkspaceShareRole.EDITOR
+        )
+        self._store.delete_sample(sample_id)
+        audit_service.record(
+            organization_id=sample.organization_id,
+            actor=actor,
+            event_type="eln.sample_deleted",
+            resource_type="sample",
+            resource_id=sample_id,
+            payload={
+                "experiment_id": sample.experiment_id,
+                "name": sample.name,
+                "well_position": sample.well_position,
+            },
+        )
+
     # ----------------------------------------------------------------- #
     # Datasets
     # ----------------------------------------------------------------- #
     def create_dataset(self, payload: DatasetCreate, actor: Actor) -> Dataset:
-        organization_service.require_access(actor, payload.organization_id)
         sample = self._store.get_sample(payload.sample_id)
         if sample is None or sample.organization_id != payload.organization_id:
             raise _not_found("sample", payload.sample_id)
+        experiment = self._store.get_experiment(sample.experiment_id)
+        if experiment is None:
+            raise _not_found("experiment", sample.experiment_id)
+        self._require_experiment_role(
+            experiment, actor, WorkspaceShareRole.EDITOR
+        )
         dataset = Dataset(**payload.model_dump())
         self._store.create_dataset(dataset)
         audit_service.record(
@@ -522,12 +895,85 @@ class ElnService:
         dataset = self._store.get_dataset(dataset_id)
         if dataset is None:
             raise _not_found("dataset", dataset_id)
-        organization_service.require_access(actor, dataset.organization_id)
+        sample = self._store.get_sample(dataset.sample_id)
+        if sample is None:
+            raise _not_found("sample", dataset.sample_id)
+        experiment = self._store.get_experiment(sample.experiment_id)
+        if experiment is None:
+            raise _not_found("experiment", sample.experiment_id)
+        self._require_experiment_role(
+            experiment, actor, WorkspaceShareRole.VIEWER
+        )
         return dataset
 
     # ----------------------------------------------------------------- #
     # Helpers
     # ----------------------------------------------------------------- #
+    def require_workspace_role(
+        self,
+        workspace_id: str,
+        actor: Actor,
+        min_role: WorkspaceShareRole | Literal["owner"],
+    ) -> Workspace:
+        """Require at least ``min_role`` on a workspace (org members are owners)."""
+        workspace = self._store.get_workspace(workspace_id)
+        if workspace is None:
+            raise _not_found("workspace", workspace_id)
+        access = self._workspace_access_level(workspace, actor)
+        needed = _coerce_access(min_role)
+        if access is None or _ACCESS_RANK[access] < _ACCESS_RANK[needed]:
+            raise api_error(
+                status_code=403,
+                code="forbidden",
+                message="Caller does not have sufficient access to this workspace",
+                details={
+                    "workspace_id": workspace_id,
+                    "required_role": needed,
+                    "actual_role": access,
+                },
+            )
+        return workspace
+
+    def _workspace_access_level(
+        self, workspace: Workspace, actor: Actor
+    ) -> WorkspaceAccess | None:
+        if workspace.organization_id in actor.organization_ids:
+            return "owner"
+        share = self._store.find_share(workspace.id, actor.subject)
+        if share is None:
+            return None
+        return _coerce_access(share.role)
+
+    def _require_experiment_role(
+        self,
+        experiment: Experiment,
+        actor: Actor,
+        min_role: WorkspaceShareRole | Literal["owner"],
+    ) -> None:
+        if experiment.project_id is not None:
+            project = self._store.get_project(experiment.project_id)
+            if project is None:
+                raise _not_found("project", experiment.project_id)
+            self.require_workspace_role(project.workspace_id, actor, min_role)
+            return
+        # Legacy experiments without a project: org membership only.
+        organization_service.require_access(actor, experiment.organization_id)
+
+    def _validate_share_subject(self, subject: str) -> str:
+        cleaned = subject.strip()
+        if cleaned in _KNOWN_SUBJECTS or _EMAIL_SUBJECT.match(cleaned):
+            return cleaned
+        raise api_error(
+            status_code=422,
+            code="invalid_subject",
+            message="Share subject must be a known user id or an email address",
+            details={"subject": cleaned},
+        )
+
+    @staticmethod
+    def _redact_invite_token(invite: WorkspaceInvite) -> WorkspaceInvite:
+        return invite.model_copy(update={"token": None})
+
     def _visible_org_ids(self, actor: Actor, organization_id: str | None) -> list[str]:
         if organization_id is not None:
             organization_service.require_access(actor, organization_id)

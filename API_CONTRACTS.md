@@ -54,6 +54,13 @@ rejected with `422 invalid_update` rather than overwriting the record.
 | `POST` | `/api/v1/workspaces/seed-defaults` | Seed default workspaces for an org (idempotent) |
 | `GET` | `/api/v1/workspaces/{workspace_id}` | Fetch a workspace |
 | `DELETE` | `/api/v1/workspaces/{workspace_id}` | Delete a workspace and its entire subtree (204) |
+| `GET` | `/api/v1/workspaces/{workspace_id}/shares` | List collaborator grants and invites (invite tokens redacted) |
+| `POST` | `/api/v1/workspaces/{workspace_id}/shares` | Grant collaborator (`viewer` \| `editor`; subject = known user or email) |
+| `PATCH` | `/api/v1/workspaces/{workspace_id}/shares/{share_id}` | Update collaborator role |
+| `DELETE` | `/api/v1/workspaces/{workspace_id}/shares/{share_id}` | Revoke collaborator grant (204) |
+| `POST` | `/api/v1/workspaces/{workspace_id}/invites` | Create invite link (`role`, optional `expires_in_hours`, `max_uses`) — returns token once |
+| `DELETE` | `/api/v1/workspaces/{workspace_id}/invites/{invite_id}` | Revoke invite (204) |
+| `POST` | `/api/v1/workspace-invites/{token}/accept` | Accept invite → creates grant (shared-with-me; org membership not required) |
 | `POST` | `/api/v1/projects` | Create a project within a workspace |
 | `GET` | `/api/v1/projects` | List projects (`organization_id`, `workspace_id` filters) |
 | `GET` | `/api/v1/projects/{project_id}` | Fetch a project |
@@ -70,7 +77,8 @@ rejected with `422 invalid_update` rather than overwriting the record.
 | `POST` | `/api/v1/samples` | Create a sample under an experiment (max 96) |
 | `GET` | `/api/v1/experiments/{experiment_id}/samples` | List samples for an experiment |
 | `GET` | `/api/v1/samples/{sample_id}` | Fetch a sample |
-| `PATCH` | `/api/v1/samples/{sample_id}` | Update a sample |
+| `PATCH` | `/api/v1/samples/{sample_id}` | Update a sample (name, type, well, status, metadata) |
+| `DELETE` | `/api/v1/samples/{sample_id}` | Delete a sample and its datasets (204) |
 | `POST` | `/api/v1/datasets` | Attach a dataset to a sample |
 | `GET` | `/api/v1/samples/{sample_id}/datasets` | List datasets for a sample |
 | `GET` | `/api/v1/datasets/{dataset_id}` | Fetch a dataset |
@@ -124,7 +132,19 @@ subcategory values are advisory only; the API accepts any string so labs can ext
 
 `DELETE` on a workspace, project, or experiment cascades to everything nested beneath it in a
 single transaction and returns `204`. Each deletion records an audit event
-(`eln.workspace_deleted` / `eln.project_deleted` / `eln.experiment_deleted`).
+(`eln.workspace_deleted` / `eln.project_deleted` / `eln.experiment_deleted`). Workspace delete
+also removes collaborator grants and invite links.
+
+### Workspace collaboration
+
+Collaborator grants and invite links with enforced roles:
+
+- **Access levels:** org members are implicit **owners** (full access, including delete workspace and share management). Share grants add **viewer** (read subtree) or **editor** (create/update/delete under the workspace, but not the workspace itself or share admin).
+- **Listing:** `GET /workspaces` returns org workspaces **plus** workspaces shared with the actor (shared-with-me).
+- **Grants:** `POST /workspaces/{id}/shares` with `{ "subject", "role" }` (subject must be a known demo user id or an email). `PATCH …/shares/{id}` updates role.
+- **Invites:** `POST /workspaces/{id}/invites` with `{ "role", "expires_in_hours?", "max_uses?" }` (default 168h). The capability `token` is returned **only on create**; list/collaboration responses set `token` to `null`. Accept via `POST /workspace-invites/{token}/accept` (no prior org membership required).
+
+Audit events: `eln.workspace_share_granted`, `eln.workspace_share_updated`, `eln.workspace_share_revoked`, `eln.workspace_invite_created`, `eln.workspace_invite_revoked`, `eln.workspace_invite_accepted`.
 
 ## Example Workspace Create
 
@@ -134,6 +154,33 @@ single transaction and returns `204`. Each deletion records an audit event
   "name": "Sequencing core",
   "category": "next_gen_sequencing",
   "subcategory": "RNA"
+}
+```
+
+## Example Workspace Share Create
+
+```json
+{
+  "subject": "user_demo_admin",
+  "role": "editor"
+}
+```
+
+## Example Workspace Invite Create
+
+```json
+{
+  "role": "viewer",
+  "expires_in_hours": 168,
+  "max_uses": 5
+}
+```
+
+## Example Workspace Share Update
+
+```json
+{
+  "role": "editor"
 }
 ```
 

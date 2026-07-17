@@ -8,11 +8,12 @@ immutable ExperimentVersion ("commit") with a parent pointer, and the
 experiment tracks the current HEAD version.
 """
 
+import secrets
 from datetime import datetime, timezone
 from enum import StrEnum
 from uuid import uuid4
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 MAX_SAMPLES_PER_EXPERIMENT = 96
 PLATE_ROWS = "ABCDEFGH"
@@ -122,6 +123,13 @@ class DatasetType(StrEnum):
     OTHER = "other"
 
 
+class WorkspaceShareRole(StrEnum):
+    """Collaboration role on a shared workspace."""
+
+    VIEWER = "viewer"
+    EDITOR = "editor"
+
+
 class ExperimentBlock(BaseModel):
     """A structured block inside an experiment version."""
 
@@ -149,6 +157,83 @@ class Workspace(WorkspaceCreate):
     is_default: bool = False
     created_at: datetime = Field(default_factory=_now)
     updated_at: datetime = Field(default_factory=_now)
+
+
+# --------------------------------------------------------------------------- #
+# Workspace collaboration (shares + invites)
+# --------------------------------------------------------------------------- #
+class WorkspaceShareCreate(BaseModel):
+    """Payload for granting a collaborator access to a workspace."""
+
+    subject: str = Field(min_length=1, max_length=128)
+    role: WorkspaceShareRole = WorkspaceShareRole.VIEWER
+
+
+class WorkspaceShareUpdate(BaseModel):
+    """Payload for updating a collaborator grant's role."""
+
+    role: WorkspaceShareRole
+
+
+class WorkspaceShare(BaseModel):
+    """Persisted collaborator grant on a workspace."""
+
+    id: str = Field(default_factory=lambda: f"wss_{uuid4().hex}")
+    workspace_id: str
+    organization_id: str
+    subject: str
+    role: WorkspaceShareRole
+    granted_by: str
+    created_at: datetime = Field(default_factory=_now)
+
+
+class WorkspaceInviteCreate(BaseModel):
+    """Payload for creating a workspace invite link."""
+
+    role: WorkspaceShareRole = WorkspaceShareRole.VIEWER
+    expires_in_hours: int = Field(default=168, ge=1, le=8760)
+    max_uses: int | None = Field(default=None, ge=1, le=10_000)
+
+
+class WorkspaceInvite(BaseModel):
+    """Persisted invite link for a workspace.
+
+    ``token`` is returned only on create; list/collaboration responses redact it.
+    """
+
+    id: str = Field(default_factory=lambda: f"wsi_{uuid4().hex}")
+    workspace_id: str
+    organization_id: str
+    token: str | None = Field(default_factory=lambda: secrets.token_urlsafe(32))
+    role: WorkspaceShareRole
+    created_by: str
+    expires_at: datetime
+    revoked_at: datetime | None = None
+    accepted_count: int = 0
+    max_uses: int | None = None
+    created_at: datetime = Field(default_factory=_now)
+
+    @field_validator("expires_at", "revoked_at", "created_at", mode="before")
+    @classmethod
+    def _ensure_aware(cls, value: object) -> object:
+        if isinstance(value, datetime) and value.tzinfo is None:
+            return value.replace(tzinfo=timezone.utc)
+        return value
+
+    @property
+    def is_active(self) -> bool:
+        if self.revoked_at is not None:
+            return False
+        if self.max_uses is not None and self.accepted_count >= self.max_uses:
+            return False
+        return self.expires_at >= _now()
+
+
+class WorkspaceCollaboration(BaseModel):
+    """Bundle of grants and invites for a workspace share panel."""
+
+    shares: list[WorkspaceShare] = Field(default_factory=list)
+    invites: list[WorkspaceInvite] = Field(default_factory=list)
 
 
 # --------------------------------------------------------------------------- #

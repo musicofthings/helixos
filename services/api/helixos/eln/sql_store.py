@@ -19,7 +19,9 @@ from helixos.eln.orm import (
     ExperimentVersionORM,
     ProjectORM,
     SampleORM,
+    WorkspaceInviteORM,
     WorkspaceORM,
+    WorkspaceShareORM,
 )
 from helixos.eln.schemas import (
     Dataset,
@@ -29,6 +31,8 @@ from helixos.eln.schemas import (
     Project,
     Sample,
     Workspace,
+    WorkspaceInvite,
+    WorkspaceShare,
 )
 from helixos.eln.stores import PlateFullError, WellOccupiedError
 
@@ -117,7 +121,7 @@ class SqlElnStore:
 
     def delete_workspace(self, workspace_id: str) -> None:
         # Cascade: datasets -> samples -> versions -> experiments -> projects ->
-        # workspace, in one transaction so a partial delete can't orphan rows.
+        # shares/invites -> workspace, in one transaction.
         with session_scope() as session:
             project_ids = list(
                 session.scalars(
@@ -132,9 +136,155 @@ class SqlElnStore:
                 session.query(ProjectORM).filter(
                     ProjectORM.id.in_(project_ids)
                 ).delete(synchronize_session=False)
+            session.query(WorkspaceShareORM).filter(
+                WorkspaceShareORM.workspace_id == workspace_id
+            ).delete(synchronize_session=False)
+            session.query(WorkspaceInviteORM).filter(
+                WorkspaceInviteORM.workspace_id == workspace_id
+            ).delete(synchronize_session=False)
             workspace = session.get(WorkspaceORM, workspace_id)
             if workspace is not None:
                 session.delete(workspace)
+
+    def create_share(self, share: WorkspaceShare) -> WorkspaceShare:
+        with session_scope() as session:
+            session.add(
+                WorkspaceShareORM(
+                    id=share.id,
+                    workspace_id=share.workspace_id,
+                    organization_id=share.organization_id,
+                    subject=share.subject,
+                    role=share.role.value,
+                    granted_by=share.granted_by,
+                    created_at=share.created_at,
+                )
+            )
+        return share
+
+    def get_share(self, share_id: str) -> WorkspaceShare | None:
+        with session_scope() as session:
+            row = session.get(WorkspaceShareORM, share_id)
+            return _to_share(row) if row else None
+
+    def list_shares(self, workspace_id: str) -> list[WorkspaceShare]:
+        with session_scope() as session:
+            rows = session.scalars(
+                select(WorkspaceShareORM)
+                .where(WorkspaceShareORM.workspace_id == workspace_id)
+                .order_by(WorkspaceShareORM.created_at.asc())
+            ).all()
+            return [_to_share(row) for row in rows]
+
+    def delete_share(self, share_id: str) -> None:
+        with session_scope() as session:
+            row = session.get(WorkspaceShareORM, share_id)
+            if row is not None:
+                session.delete(row)
+
+    def find_share(self, workspace_id: str, subject: str) -> WorkspaceShare | None:
+        with session_scope() as session:
+            row = session.scalar(
+                select(WorkspaceShareORM)
+                .where(
+                    WorkspaceShareORM.workspace_id == workspace_id,
+                    WorkspaceShareORM.subject == subject,
+                )
+                .limit(1)
+            )
+            return _to_share(row) if row else None
+
+    def list_shares_for_subject(self, subject: str) -> list[WorkspaceShare]:
+        with session_scope() as session:
+            rows = session.scalars(
+                select(WorkspaceShareORM)
+                .where(WorkspaceShareORM.subject == subject)
+                .order_by(WorkspaceShareORM.created_at.asc())
+            ).all()
+            return [_to_share(row) for row in rows]
+
+    def update_share(self, share: WorkspaceShare) -> WorkspaceShare:
+        with session_scope() as session:
+            row = session.get(WorkspaceShareORM, share.id)
+            if row is None:
+                raise KeyError(share.id)
+            row.role = share.role.value
+        return share
+
+    def create_invite(self, invite: WorkspaceInvite) -> WorkspaceInvite:
+        if not invite.token:
+            raise ValueError("Invite token is required for persistence")
+        with session_scope() as session:
+            session.add(
+                WorkspaceInviteORM(
+                    id=invite.id,
+                    workspace_id=invite.workspace_id,
+                    organization_id=invite.organization_id,
+                    token=invite.token,
+                    role=invite.role.value,
+                    created_by=invite.created_by,
+                    expires_at=invite.expires_at,
+                    revoked_at=invite.revoked_at,
+                    accepted_count=invite.accepted_count,
+                    max_uses=invite.max_uses,
+                    created_at=invite.created_at,
+                )
+            )
+        return invite
+
+    def get_invite(self, invite_id: str) -> WorkspaceInvite | None:
+        with session_scope() as session:
+            row = session.get(WorkspaceInviteORM, invite_id)
+            return _to_invite(row) if row else None
+
+    def get_invite_by_token(self, token: str) -> WorkspaceInvite | None:
+        with session_scope() as session:
+            row = session.scalar(
+                select(WorkspaceInviteORM)
+                .where(WorkspaceInviteORM.token == token)
+                .limit(1)
+            )
+            return _to_invite(row) if row else None
+
+    def list_invites(self, workspace_id: str) -> list[WorkspaceInvite]:
+        with session_scope() as session:
+            rows = session.scalars(
+                select(WorkspaceInviteORM)
+                .where(WorkspaceInviteORM.workspace_id == workspace_id)
+                .order_by(WorkspaceInviteORM.created_at.desc())
+            ).all()
+            return [_to_invite(row) for row in rows]
+
+    def update_invite(self, invite: WorkspaceInvite) -> WorkspaceInvite:
+        with session_scope() as session:
+            row = session.get(WorkspaceInviteORM, invite.id)
+            if row is not None:
+                row.revoked_at = invite.revoked_at
+                row.accepted_count = invite.accepted_count
+                row.max_uses = invite.max_uses
+        return invite
+
+    def accept_invite(
+        self, invite: WorkspaceInvite, share: WorkspaceShare | None
+    ) -> tuple[WorkspaceInvite, WorkspaceShare | None]:
+        with session_scope() as session:
+            row = session.get(WorkspaceInviteORM, invite.id)
+            if row is None:
+                raise KeyError(invite.id)
+            row.accepted_count = invite.accepted_count + 1
+            updated = _to_invite(row)
+            if share is not None:
+                session.add(
+                    WorkspaceShareORM(
+                        id=share.id,
+                        workspace_id=share.workspace_id,
+                        organization_id=share.organization_id,
+                        subject=share.subject,
+                        role=share.role.value,
+                        granted_by=share.granted_by,
+                        created_at=share.created_at,
+                    )
+                )
+            return updated, share
 
     # Projects
     def create_project(self, project: Project) -> Project:
@@ -439,6 +589,15 @@ class SqlElnStore:
                 row.updated_at = sample.updated_at
         return sample
 
+    def delete_sample(self, sample_id: str) -> None:
+        with session_scope() as session:
+            session.query(DatasetORM).filter(
+                DatasetORM.sample_id == sample_id
+            ).delete(synchronize_session=False)
+            sample = session.get(SampleORM, sample_id)
+            if sample is not None:
+                session.delete(sample)
+
     # Datasets
     def create_dataset(self, dataset: Dataset) -> Dataset:
         with session_scope() as session:
@@ -498,6 +657,42 @@ def _to_workspace(row: WorkspaceORM) -> Workspace:
         is_default=row.is_default,
         created_at=row.created_at,
         updated_at=row.updated_at,
+    )
+
+
+def _to_share(row: WorkspaceShareORM) -> WorkspaceShare:
+    return WorkspaceShare(
+        id=row.id,
+        workspace_id=row.workspace_id,
+        organization_id=row.organization_id,
+        subject=row.subject,
+        role=row.role,
+        granted_by=row.granted_by,
+        created_at=row.created_at,
+    )
+
+
+def _ensure_aware(value: datetime | None) -> datetime | None:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value
+
+
+def _to_invite(row: WorkspaceInviteORM) -> WorkspaceInvite:
+    return WorkspaceInvite(
+        id=row.id,
+        workspace_id=row.workspace_id,
+        organization_id=row.organization_id,
+        token=row.token,
+        role=row.role,
+        created_by=row.created_by,
+        expires_at=_ensure_aware(row.expires_at) or row.expires_at,
+        revoked_at=_ensure_aware(row.revoked_at),
+        accepted_count=row.accepted_count,
+        max_uses=row.max_uses,
+        created_at=_ensure_aware(row.created_at) or row.created_at,
     )
 
 

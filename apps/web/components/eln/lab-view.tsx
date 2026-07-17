@@ -16,54 +16,9 @@ import {
   useSeedDefaultWorkspaces,
   useWorkspaces
 } from "../../hooks/use-helix-api";
+import { categoryLabel } from "../../lib/workspace-taxonomy";
 import { ExperimentDetail } from "./experiment-detail";
-
-type CategoryDef = {
-  value: WorkspaceCategory;
-  label: string;
-  subcategories: string[];
-};
-
-// Mirrors CATEGORY_SUBCATEGORIES in services/api/helixos/eln/schemas.py. The
-// subcategory is stored as a free string, so these lists are suggestions the
-// "Other…" option lets the user extend.
-const CATEGORY_TAXONOMY: CategoryDef[] = [
-  { value: "molecular_biology", label: "Molecular Biology", subcategories: [] },
-  { value: "biochemistry", label: "Biochemistry", subcategories: [] },
-  { value: "microbiology", label: "Microbiology", subcategories: [] },
-  {
-    value: "next_gen_sequencing",
-    label: "Next Generation Sequencing",
-    subcategories: ["DNA", "RNA", "Protein"]
-  },
-  {
-    value: "digital_pathology",
-    label: "Digital Pathology & Imaging",
-    subcategories: ["Cells", "Tissues"]
-  },
-  {
-    value: "programmable_bio",
-    label: "Programmable Bio",
-    subcategories: ["Single-cell experiments", "PerturbGen", "Protein-protein interaction studies"]
-  },
-  { value: "custom", label: "Custom", subcategories: [] }
-];
-
-const CATEGORY_LABELS: Record<string, string> = Object.fromEntries(
-  CATEGORY_TAXONOMY.map((entry) => [entry.value, entry.label])
-);
-
-const OTHER_SUBCATEGORY = "__other__";
-
-function categoryLabel(category: string): string {
-  return (
-    CATEGORY_LABELS[category] ??
-    category
-      .split("_")
-      .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-      .join(" ")
-  );
-}
+import { WorkspaceCreateForm } from "./workspace-create-form";
 
 type DeleteTarget = { kind: "workspace" | "project" | "experiment"; id: string; name: string };
 
@@ -73,7 +28,10 @@ export function LabView({
   selectedExperimentId,
   onSelectExperiment,
   onActivity,
-  newExperimentNonce = 0
+  newExperimentNonce = 0,
+  resumeWorkspaceId,
+  resumeNonce = 0,
+  onResumeConsumed
 }: {
   organizationId?: string;
   apiEnabled: boolean;
@@ -81,6 +39,10 @@ export function LabView({
   onSelectExperiment: (id: string | undefined) => void;
   onActivity: (message: string) => void;
   newExperimentNonce?: number;
+  /** One-shot resume target; consumed with ``resumeNonce``. */
+  resumeWorkspaceId?: string;
+  resumeNonce?: number;
+  onResumeConsumed?: () => void;
 }) {
   const workspacesQuery = useWorkspaces(organizationId, apiEnabled);
   const seedWorkspaces = useSeedDefaultWorkspaces(organizationId);
@@ -109,18 +71,11 @@ export function LabView({
   );
 
   const [showWorkspaceForm, setShowWorkspaceForm] = useState(false);
-  const [workspaceName, setWorkspaceName] = useState("");
-  const [workspaceCategory, setWorkspaceCategory] = useState<WorkspaceCategory>("molecular_biology");
-  const [workspaceSubcategory, setWorkspaceSubcategory] = useState("");
-  const [workspaceSubcategoryOther, setWorkspaceSubcategoryOther] = useState("");
   const [showProjectForm, setShowProjectForm] = useState(false);
   const [projectName, setProjectName] = useState("");
   const [showExperimentForm, setShowExperimentForm] = useState(false);
   const [experimentName, setExperimentName] = useState("");
   const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null);
-
-  const activeCategory = CATEGORY_TAXONOMY.find((entry) => entry.value === workspaceCategory);
-  const categoryHasSubcategories = (activeCategory?.subcategories.length ?? 0) > 0;
 
   // Keep selections valid as lists load or entities are deleted: fall back to
   // the first available item, or clear when nothing remains.
@@ -130,6 +85,16 @@ export function LabView({
       setSelectedWorkspaceId(workspaces[0]?.id);
     }
   }, [workspaces, selectedWorkspaceId]);
+
+  // One-shot resume from the Workspace tab: apply once per nonce, then clear.
+  const handledResumeNonce = useRef(resumeNonce);
+  useEffect(() => {
+    if (!resumeWorkspaceId || resumeNonce === handledResumeNonce.current) return;
+    if (!workspaces.some((workspace) => workspace.id === resumeWorkspaceId)) return;
+    handledResumeNonce.current = resumeNonce;
+    setSelectedWorkspaceId(resumeWorkspaceId);
+    onResumeConsumed?.();
+  }, [resumeWorkspaceId, resumeNonce, workspaces, onResumeConsumed]);
 
   useEffect(() => {
     setSelectedProjectId(undefined);
@@ -173,36 +138,24 @@ export function LabView({
   const selectedExperiment =
     experiments.find((experiment) => experiment.id === selectedExperimentId) ?? null;
 
-  function resolvedSubcategory(): string | null {
-    if (!categoryHasSubcategories) return null;
-    if (workspaceSubcategory === OTHER_SUBCATEGORY) {
-      return workspaceSubcategoryOther.trim() || null;
-    }
-    return workspaceSubcategory || null;
-  }
-
-  function resetWorkspaceForm() {
-    setWorkspaceName("");
-    setWorkspaceSubcategory("");
-    setWorkspaceSubcategoryOther("");
-    setShowWorkspaceForm(false);
-  }
-
-  function submitWorkspace(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!workspaceName.trim() || !organizationId) return;
+  function submitWorkspace(values: {
+    name: string;
+    category: WorkspaceCategory;
+    subcategory: string | null;
+  }) {
+    if (!organizationId) return;
     createWorkspace.mutate(
       {
         organizationId,
-        name: workspaceName.trim(),
-        category: workspaceCategory,
-        subcategory: resolvedSubcategory()
+        name: values.name,
+        category: values.category,
+        subcategory: values.subcategory
       },
       {
         onSuccess: (workspace) => {
           onActivity(`Created workspace ${workspace.name}`);
           setSelectedWorkspaceId(workspace.id);
-          resetWorkspaceForm();
+          setShowWorkspaceForm(false);
         },
         onError: (error) => onActivity(error instanceof Error ? error.message : "Failed to create workspace")
       }
@@ -343,57 +296,12 @@ export function LabView({
               ))
             )}
             {showWorkspaceForm ? (
-              <form onSubmit={submitWorkspace} className="mt-1 grid gap-2 rounded-md border border-black/10 bg-[#fbfbf8] p-2">
-                <input
-                  value={workspaceName}
-                  onChange={(event) => setWorkspaceName(event.target.value)}
-                  placeholder="Workspace name"
-                  className="rounded-md border border-black/10 bg-white px-2 py-1.5 text-sm outline-none focus:border-fern"
-                />
-                <label className="text-[11px] font-medium uppercase tracking-wide text-graphite">Category</label>
-                <select
-                  value={workspaceCategory}
-                  onChange={(event) => {
-                    setWorkspaceCategory(event.target.value as WorkspaceCategory);
-                    setWorkspaceSubcategory("");
-                    setWorkspaceSubcategoryOther("");
-                  }}
-                  className="rounded-md border border-black/10 bg-white px-2 py-1.5 text-sm outline-none focus:border-fern"
-                >
-                  {CATEGORY_TAXONOMY.map((entry) => (
-                    <option key={entry.value} value={entry.value}>
-                      {entry.label}
-                    </option>
-                  ))}
-                </select>
-                {categoryHasSubcategories ? (
-                  <>
-                    <label className="text-[11px] font-medium uppercase tracking-wide text-graphite">Subcategory</label>
-                    <select
-                      value={workspaceSubcategory}
-                      onChange={(event) => setWorkspaceSubcategory(event.target.value)}
-                      className="rounded-md border border-black/10 bg-white px-2 py-1.5 text-sm outline-none focus:border-fern"
-                    >
-                      <option value="">Select subcategory…</option>
-                      {activeCategory?.subcategories.map((sub) => (
-                        <option key={sub} value={sub}>
-                          {sub}
-                        </option>
-                      ))}
-                      <option value={OTHER_SUBCATEGORY}>Other…</option>
-                    </select>
-                    {workspaceSubcategory === OTHER_SUBCATEGORY ? (
-                      <input
-                        value={workspaceSubcategoryOther}
-                        onChange={(event) => setWorkspaceSubcategoryOther(event.target.value)}
-                        placeholder="Custom subcategory"
-                        className="rounded-md border border-black/10 bg-white px-2 py-1.5 text-sm outline-none focus:border-fern"
-                      />
-                    ) : null}
-                  </>
-                ) : null}
-                <SubmitButton pending={createWorkspace.isPending} label="Create workspace" />
-              </form>
+              <WorkspaceCreateForm
+                compact
+                pending={createWorkspace.isPending}
+                onSubmit={submitWorkspace}
+                onCancel={() => setShowWorkspaceForm(false)}
+              />
             ) : null}
           </NavSection>
 

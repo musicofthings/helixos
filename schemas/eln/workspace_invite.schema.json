@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://helixos.dev/schemas/eln/workspace_invite.schema.json",
+  "title": "WorkspaceInvite",
+  "type": "object",
+  "required": [
+    "id",
+    "workspace_id",
+    "organization_id",
+    "role",
+    "created_by",
+    "expires_at",
+    "accepted_count",
+    "created_at"
+  ],
+  "properties": {
+    "id": { "type": "string" },
+    "workspace_id": { "type": "string" },
+    "organization_id": { "type": "string" },
+    "token": {
+      "type": ["string", "null"],
+      "description": "Capability secret returned only on create; list/collaboration responses redact it."
+    },
+    "role": { "type": "string", "enum": ["viewer", "editor"] },
+    "created_by": { "type": "string" },
+    "expires_at": { "type": "string", "format": "date-time" },
+    "revoked_at": { "type": ["string", "null"], "format": "date-time" },
+    "accepted_count": { "type": "integer", "minimum": 0 },
+    "max_uses": {
+      "type": ["integer", "null"],
+      "minimum": 1,
+      "description": "Optional cap on successful accepts; null means unlimited."
+    },
+    "created_at": { "type": "string", "format": "date-time" }
+  }
+}

@@ -23,7 +23,13 @@ import type {
   SampleUpdate,
   Sequence,
   Workspace,
-  WorkspaceCreate
+  WorkspaceCollaboration,
+  WorkspaceCreate,
+  WorkspaceInvite,
+  WorkspaceInviteCreate,
+  WorkspaceShare,
+  WorkspaceShareCreate,
+  WorkspaceShareUpdate
 } from "@helixos/types";
 
 import { HelixOSApiError } from "./errors";
@@ -117,6 +123,55 @@ export class HelixOSClient {
     return this.request(`/api/v1/workspaces/${encodeURIComponent(workspaceId)}`, { method: "DELETE" });
   }
 
+  listWorkspaceCollaboration(workspaceId: string): Promise<WorkspaceCollaboration> {
+    return this.request(`/api/v1/workspaces/${encodeURIComponent(workspaceId)}/shares`);
+  }
+
+  createWorkspaceShare(workspaceId: string, payload: WorkspaceShareCreate): Promise<WorkspaceShare> {
+    return this.request(`/api/v1/workspaces/${encodeURIComponent(workspaceId)}/shares`, {
+      method: "POST",
+      body: JSON.stringify(payload)
+    });
+  }
+
+  updateWorkspaceShare(
+    workspaceId: string,
+    shareId: string,
+    payload: WorkspaceShareUpdate
+  ): Promise<WorkspaceShare> {
+    return this.request(
+      `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/shares/${encodeURIComponent(shareId)}`,
+      { method: "PATCH", body: JSON.stringify(payload) }
+    );
+  }
+
+  revokeWorkspaceShare(workspaceId: string, shareId: string): Promise<void> {
+    return this.request(
+      `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/shares/${encodeURIComponent(shareId)}`,
+      { method: "DELETE" }
+    );
+  }
+
+  createWorkspaceInvite(workspaceId: string, payload: WorkspaceInviteCreate): Promise<WorkspaceInvite> {
+    return this.request(`/api/v1/workspaces/${encodeURIComponent(workspaceId)}/invites`, {
+      method: "POST",
+      body: JSON.stringify(payload)
+    });
+  }
+
+  revokeWorkspaceInvite(workspaceId: string, inviteId: string): Promise<void> {
+    return this.request(
+      `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/invites/${encodeURIComponent(inviteId)}`,
+      { method: "DELETE" }
+    );
+  }
+
+  acceptWorkspaceInvite(token: string): Promise<WorkspaceShare> {
+    return this.request(`/api/v1/workspace-invites/${encodeURIComponent(token)}/accept`, {
+      method: "POST"
+    });
+  }
+
   // --- Projects ----------------------------------------------------------- //
   listProjects(params?: { organizationId?: string; workspaceId?: string }): Promise<Project[]> {
     const search = new URLSearchParams();
@@ -201,6 +256,10 @@ export class HelixOSClient {
       method: "PATCH",
       body: JSON.stringify(payload)
     });
+  }
+
+  deleteSample(sampleId: string): Promise<void> {
+    return this.request(`/api/v1/samples/${encodeURIComponent(sampleId)}`, { method: "DELETE" });
   }
 
   // --- Datasets ----------------------------------------------------------- //
