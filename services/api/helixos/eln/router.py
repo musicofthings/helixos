@@ -19,7 +19,13 @@ from helixos.eln.schemas import (
     SampleCreate,
     SampleUpdate,
     Workspace,
+    WorkspaceCollaboration,
     WorkspaceCreate,
+    WorkspaceInvite,
+    WorkspaceInviteCreate,
+    WorkspaceShare,
+    WorkspaceShareCreate,
+    WorkspaceShareUpdate,
 )
 from helixos.eln.service import eln_service
 from pydantic import BaseModel
@@ -75,6 +81,87 @@ def delete_workspace(
 ) -> None:
     """Delete a workspace and everything nested beneath it."""
     eln_service.delete_workspace(workspace_id, actor=actor)
+
+
+@router.get(
+    "/workspaces/{workspace_id}/shares", response_model=WorkspaceCollaboration
+)
+def list_workspace_collaboration(
+    workspace_id: str, actor: Actor = Depends(get_current_actor)
+) -> WorkspaceCollaboration:
+    """List collaborator grants and invites for a workspace."""
+    shares, invites = eln_service.list_collaboration(workspace_id, actor=actor)
+    return WorkspaceCollaboration(shares=shares, invites=invites)
+
+
+@router.post(
+    "/workspaces/{workspace_id}/shares",
+    response_model=WorkspaceShare,
+    status_code=201,
+)
+def create_workspace_share(
+    workspace_id: str,
+    payload: WorkspaceShareCreate,
+    actor: Actor = Depends(get_current_actor),
+) -> WorkspaceShare:
+    """Grant a same-org collaborator access to a workspace."""
+    return eln_service.create_share(workspace_id, payload, actor=actor)
+
+
+@router.patch(
+    "/workspaces/{workspace_id}/shares/{share_id}",
+    response_model=WorkspaceShare,
+)
+def update_workspace_share(
+    workspace_id: str,
+    share_id: str,
+    payload: WorkspaceShareUpdate,
+    actor: Actor = Depends(get_current_actor),
+) -> WorkspaceShare:
+    """Update a collaborator grant's role."""
+    return eln_service.update_share(workspace_id, share_id, payload, actor=actor)
+
+
+@router.delete("/workspaces/{workspace_id}/shares/{share_id}", status_code=204)
+def revoke_workspace_share(
+    workspace_id: str, share_id: str, actor: Actor = Depends(get_current_actor)
+) -> None:
+    """Revoke a collaborator grant."""
+    eln_service.revoke_share(workspace_id, share_id, actor=actor)
+
+
+@router.post(
+    "/workspaces/{workspace_id}/invites",
+    response_model=WorkspaceInvite,
+    status_code=201,
+)
+def create_workspace_invite(
+    workspace_id: str,
+    payload: WorkspaceInviteCreate,
+    actor: Actor = Depends(get_current_actor),
+) -> WorkspaceInvite:
+    """Create an invite link for a workspace."""
+    return eln_service.create_invite(workspace_id, payload, actor=actor)
+
+
+@router.delete("/workspaces/{workspace_id}/invites/{invite_id}", status_code=204)
+def revoke_workspace_invite(
+    workspace_id: str, invite_id: str, actor: Actor = Depends(get_current_actor)
+) -> None:
+    """Revoke a workspace invite link."""
+    eln_service.revoke_invite(workspace_id, invite_id, actor=actor)
+
+
+@router.post(
+    "/workspace-invites/{token}/accept",
+    response_model=WorkspaceShare,
+    status_code=201,
+)
+def accept_workspace_invite(
+    token: str, actor: Actor = Depends(get_current_actor)
+) -> WorkspaceShare:
+    """Accept a workspace invite and become a collaborator."""
+    return eln_service.accept_invite(token, actor=actor)
 
 
 # --------------------------------------------------------------------------- #
@@ -243,6 +330,14 @@ def update_sample(
 ) -> Sample:
     """Update a sample's mutable fields."""
     return eln_service.update_sample(sample_id, payload, actor=actor)
+
+
+@router.delete("/samples/{sample_id}", status_code=204)
+def delete_sample(
+    sample_id: str, actor: Actor = Depends(get_current_actor)
+) -> None:
+    """Delete a sample and every dataset attached to it."""
+    eln_service.delete_sample(sample_id, actor=actor)
 
 
 # --------------------------------------------------------------------------- #

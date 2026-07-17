@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://helixos.dev/schemas/eln/workspace_share.schema.json",
+  "title": "WorkspaceShare",
+  "type": "object",
+  "required": [
+    "id",
+    "workspace_id",
+    "organization_id",
+    "subject",
+    "role",
+    "granted_by",
+    "created_at"
+  ],
+  "properties": {
+    "id": { "type": "string" },
+    "workspace_id": { "type": "string" },
+    "organization_id": { "type": "string" },
+    "subject": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "role": { "type": "string", "enum": ["viewer", "editor"] },
+    "granted_by": { "type": "string" },
+    "created_at": { "type": "string", "format": "date-time" }
+  }
+}

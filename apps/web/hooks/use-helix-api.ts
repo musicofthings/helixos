@@ -2,7 +2,13 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { DatasetType, SampleType, WorkspaceCategory } from "@helixos/types";
+import type {
+  DatasetType,
+  SampleStatus,
+  SampleType,
+  WorkspaceCategory,
+  WorkspaceShareRole
+} from "@helixos/types";
 
 import { createHelixClient } from "../lib/api-config";
 import {
@@ -146,6 +152,119 @@ export function useDeleteWorkspace(organizationId?: string) {
   });
 }
 
+export function useWorkspaceCollaboration(workspaceId?: string, enabled = true) {
+  return useQuery({
+    queryKey: ["workspace-collaboration", workspaceId],
+    enabled: enabled && Boolean(workspaceId),
+    queryFn: async () => createHelixClient().listWorkspaceCollaboration(workspaceId!)
+  });
+}
+
+export function useCreateWorkspaceShare(organizationId?: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: {
+      workspaceId: string;
+      subject: string;
+      role: WorkspaceShareRole;
+    }) =>
+      createHelixClient().createWorkspaceShare(input.workspaceId, {
+        subject: input.subject,
+        role: input.role
+      }),
+    onSuccess: async (_data, variables) => {
+      await queryClient.invalidateQueries({
+        queryKey: ["workspace-collaboration", variables.workspaceId]
+      });
+      await invalidateAuditEvents(queryClient, organizationId);
+    }
+  });
+}
+
+export function useUpdateWorkspaceShare(organizationId?: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: {
+      workspaceId: string;
+      shareId: string;
+      role: WorkspaceShareRole;
+    }) =>
+      createHelixClient().updateWorkspaceShare(input.workspaceId, input.shareId, {
+        role: input.role
+      }),
+    onSuccess: async (_data, variables) => {
+      await queryClient.invalidateQueries({
+        queryKey: ["workspace-collaboration", variables.workspaceId]
+      });
+      await invalidateAuditEvents(queryClient, organizationId);
+    }
+  });
+}
+
+export function useRevokeWorkspaceShare(organizationId?: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: { workspaceId: string; shareId: string }) =>
+      createHelixClient().revokeWorkspaceShare(input.workspaceId, input.shareId),
+    onSuccess: async (_data, variables) => {
+      await queryClient.invalidateQueries({
+        queryKey: ["workspace-collaboration", variables.workspaceId]
+      });
+      await invalidateAuditEvents(queryClient, organizationId);
+    }
+  });
+}
+
+export function useCreateWorkspaceInvite(organizationId?: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: {
+      workspaceId: string;
+      role: WorkspaceShareRole;
+      expiresInHours?: number;
+      maxUses?: number | null;
+    }) =>
+      createHelixClient().createWorkspaceInvite(input.workspaceId, {
+        role: input.role,
+        expires_in_hours: input.expiresInHours,
+        max_uses: input.maxUses
+      }),
+    onSuccess: async (_data, variables) => {
+      await queryClient.invalidateQueries({
+        queryKey: ["workspace-collaboration", variables.workspaceId]
+      });
+      await queryClient.invalidateQueries({ queryKey: ["workspaces"] });
+      await invalidateAuditEvents(queryClient, organizationId);
+    }
+  });
+}
+
+export function useRevokeWorkspaceInvite(organizationId?: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: { workspaceId: string; inviteId: string }) =>
+      createHelixClient().revokeWorkspaceInvite(input.workspaceId, input.inviteId),
+    onSuccess: async (_data, variables) => {
+      await queryClient.invalidateQueries({
+        queryKey: ["workspace-collaboration", variables.workspaceId]
+      });
+      await invalidateAuditEvents(queryClient, organizationId);
+    }
+  });
+}
+
+export function useAcceptWorkspaceInvite(organizationId?: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (token: string) => createHelixClient().acceptWorkspaceInvite(token),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["workspaces", organizationId] });
+      await queryClient.invalidateQueries({ queryKey: ["workspace-collaboration"] });
+      await invalidateAuditEvents(queryClient, organizationId);
+    }
+  });
+}
+
 export function useDeleteProject(organizationId?: string) {
   const queryClient = useQueryClient();
   return useMutation({
@@ -169,14 +288,22 @@ export function useDeleteExperiment(organizationId?: string) {
   });
 }
 
-export function useProjects(params: { organizationId?: string; workspaceId?: string }, enabled = true) {
+export function useProjects(
+  params: { organizationId?: string; workspaceId?: string; scope?: "workspace" | "org" },
+  enabled = true
+) {
+  // LabView always scopes to a workspace; the org overview lists every project.
+  const scope = params.scope ?? "workspace";
   return useQuery({
-    queryKey: ["projects", params.organizationId, params.workspaceId],
-    enabled: enabled && Boolean(params.organizationId) && Boolean(params.workspaceId),
+    queryKey: ["projects", params.organizationId, scope === "org" ? "all" : params.workspaceId],
+    enabled:
+      enabled &&
+      Boolean(params.organizationId) &&
+      (scope === "org" || Boolean(params.workspaceId)),
     queryFn: async () =>
       createHelixClient().listProjects({
         organizationId: params.organizationId,
-        workspaceId: params.workspaceId
+        workspaceId: scope === "org" ? undefined : params.workspaceId
       })
   });
 }
@@ -198,6 +325,7 @@ export function useCreateProject(organizationId?: string) {
       }),
     onSuccess: async (_data, variables) => {
       await queryClient.invalidateQueries({ queryKey: ["projects", organizationId, variables.workspaceId] });
+      await queryClient.invalidateQueries({ queryKey: ["projects", organizationId, "all"] });
       await invalidateAuditEvents(queryClient, organizationId);
     }
   });
@@ -253,6 +381,43 @@ export function useCreateSample(organizationId?: string) {
       }),
     onSuccess: async (_data, variables) => {
       await queryClient.invalidateQueries({ queryKey: ["samples", variables.experimentId] });
+      await invalidateAuditEvents(queryClient, organizationId);
+    }
+  });
+}
+
+export function useUpdateSample(organizationId?: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: {
+      sampleId: string;
+      experimentId: string;
+      name?: string;
+      sampleType?: SampleType;
+      wellPosition?: string | null;
+      status?: SampleStatus;
+    }) =>
+      createHelixClient().updateSample(input.sampleId, {
+        name: input.name,
+        sample_type: input.sampleType,
+        well_position: input.wellPosition,
+        status: input.status
+      }),
+    onSuccess: async (_data, variables) => {
+      await queryClient.invalidateQueries({ queryKey: ["samples", variables.experimentId] });
+      await invalidateAuditEvents(queryClient, organizationId);
+    }
+  });
+}
+
+export function useDeleteSample(organizationId?: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: { sampleId: string; experimentId: string }) =>
+      createHelixClient().deleteSample(input.sampleId),
+    onSuccess: async (_data, variables) => {
+      await queryClient.invalidateQueries({ queryKey: ["samples", variables.experimentId] });
+      await queryClient.invalidateQueries({ queryKey: ["datasets"] });
       await invalidateAuditEvents(queryClient, organizationId);
     }
   });

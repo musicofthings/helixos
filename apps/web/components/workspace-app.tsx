@@ -7,19 +7,24 @@ import {
   ClipboardList,
   Dna,
   FlaskConical,
+  LayoutGrid,
   LoaderCircle,
   Network,
   PackagePlus,
   Play,
   Plus,
   Search,
+  Share2,
   ShieldCheck,
   TestTube2,
   ToggleLeft,
-  ToggleRight
+  ToggleRight,
+  Trash2
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { FormEvent, useCallback, useMemo, useRef, useState } from "react";
+import { useQueries } from "@tanstack/react-query";
+import type { Workspace } from "@helixos/types";
 
 import { AgentPanel } from "./agent/agent-panel";
 import { CommandPalette, useCommandPaletteShortcut, type CommandPaletteItem } from "./shell/command-palette";
@@ -27,23 +32,23 @@ import {
   useAgentSession,
   useAuditEvents,
   useConnectors,
+  useCreateWorkspace,
+  useDeleteWorkspace,
   useExperiments,
-  useExperimentVersions,
   useOrganizations,
+  useProjects,
   useRunConnectorJob,
+  useSeedDefaultWorkspaces,
   useSequence,
-  useUpdateVersionStatus
+  useWorkspaces
 } from "../hooks/use-helix-api";
 import { useDesktopShell } from "../hooks/use-desktop-shell";
 import { LabView } from "./eln/lab-view";
+import { ShareWorkspaceModal } from "./eln/share-workspace-modal";
+import { WorkspaceCreateForm } from "./eln/workspace-create-form";
 import { formatAuditEventMessage } from "../lib/audit-display";
-import {
-  canTransitionExperiment,
-  type ExperimentViewModel,
-  type StatusLabel,
-  type VersionViewModel
-} from "../lib/experiment-display";
-import { getApiBaseUrl } from "../lib/api-config";
+import { createHelixClient, getApiBaseUrl } from "../lib/api-config";
+import { categoryLabel } from "../lib/workspace-taxonomy";
 
 type View = "workspace" | "experiments" | "sequences" | "inventory" | "connectors";
 
@@ -75,8 +80,6 @@ type ActivityEvent = {
   id: string;
   message: string;
 };
-
-const workflow = ["Sample Received", "DNA Extraction", "QC", "Library Prep", "Sequencing", "Analysis", "Reporting"];
 
 const navItems: Array<{ id: View; icon: LucideIcon; label: string }> = [
   { id: "workspace", icon: ClipboardList, label: "Workspace" },
@@ -163,8 +166,15 @@ export function WorkspaceApp({ initialDesktopShell = false }: { initialDesktopSh
   const primaryOrganizationId = selectedOrganizationId ?? organizationsQuery.data?.[0]?.id;
 
   const experimentsQuery = useExperiments(primaryOrganizationId, apiEnabled);
+  const workspacesQuery = useWorkspaces(primaryOrganizationId, apiEnabled);
+  const orgProjectsQuery = useProjects(
+    { organizationId: primaryOrganizationId, scope: "org" },
+    apiEnabled
+  );
+  const createWorkspace = useCreateWorkspace(primaryOrganizationId);
+  const deleteWorkspace = useDeleteWorkspace(primaryOrganizationId);
+  const seedWorkspaces = useSeedDefaultWorkspaces(primaryOrganizationId);
 
-  const updateVersionStatusMutation = useUpdateVersionStatus(primaryOrganizationId);
   const runConnectorJobMutation = useRunConnectorJob(primaryOrganizationId);
 
   const auditEventsQuery = useAuditEvents(primaryOrganizationId, apiEnabled);
@@ -172,13 +182,19 @@ export function WorkspaceApp({ initialDesktopShell = false }: { initialDesktopSh
   const demoSequenceQuery = useSequence(DEMO_SEQUENCE_ID, apiEnabled && Boolean(primaryOrganizationId));
 
   const experiments = useMemo(() => experimentsQuery.data ?? [], [experimentsQuery.data]);
+  const workspaces = useMemo(() => workspacesQuery.data ?? [], [workspacesQuery.data]);
+  const orgProjects = useMemo(() => orgProjectsQuery.data ?? [], [orgProjectsQuery.data]);
   const [activeView, setActiveView] = useState<View>("experiments");
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const [selectedExperimentId, setSelectedExperimentId] = useState<string | undefined>();
+  const [resumeWorkspaceId, setResumeWorkspaceId] = useState<string | undefined>();
+  const [resumeNonce, setResumeNonce] = useState(0);
+  const [showWorkspaceCreate, setShowWorkspaceCreate] = useState(false);
+  const [shareWorkspace, setShareWorkspace] = useState<Workspace | null>(null);
+  const [deleteWorkspaceTarget, setDeleteWorkspaceTarget] = useState<Workspace | null>(null);
   const [newExperimentNonce, setNewExperimentNonce] = useState(0);
   const [inventory, setInventory] = useState(initialInventory);
   const [connectorState, setConnectorState] = useState<Record<string, Pick<ConnectorState, "enabled" | "lastRun">>>({});
-  const [workflowStep, setWorkflowStep] = useState(2);
   const [sequence, setSequence] = useState(defaultSequence);
   const [loadedSequenceName, setLoadedSequenceName] = useState<string | undefined>();
   const [activity, setActivity] = useState<ActivityEvent[]>([
@@ -186,10 +202,17 @@ export function WorkspaceApp({ initialDesktopShell = false }: { initialDesktopSh
   ]);
   const activityCounter = useRef(0);
 
-  // Experiment selection is owned by the Lab workbench (LabView). The dashboard
-  // falls back to the first experiment for display, so no auto-select effect is
-  // needed here — adding one fights LabView's project-scoped selection and loops.
+  // Experiment selection is owned by the Lab workbench (LabView).
   const displayExperiments = experiments;
+
+  const sampleCountQueries = useQueries({
+    queries: experiments.slice(0, 20).map((experiment) => ({
+      queryKey: ["samples", experiment.id],
+      enabled: apiEnabled && Boolean(experiment.id),
+      queryFn: () => createHelixClient().listSamples(experiment.id)
+    }))
+  });
+  const sampleCount = sampleCountQueries.reduce((total, query) => total + (query.data?.length ?? 0), 0);
 
   const connectorRegistry = useMemo(() => connectorsQuery.data ?? [], [connectorsQuery.data]);
   const connectorTransportById = useMemo(
@@ -202,17 +225,13 @@ export function WorkspaceApp({ initialDesktopShell = false }: { initialDesktopSh
     displayExperiments[0] ??
     null;
 
-  const versionsQuery = useExperimentVersions(selectedExperiment?.id, apiEnabled);
-  const headVersion = useMemo<VersionViewModel | null>(() => {
-    const versions = versionsQuery.data ?? [];
-    if (!versions.length) {
-      return null;
-    }
-    const head = selectedExperiment?.headVersionId
-      ? versions.find((version) => version.id === selectedExperiment.headVersionId)
-      : undefined;
-    return head ?? versions[versions.length - 1];
-  }, [selectedExperiment?.headVersionId, versionsQuery.data]);
+  const recentExperiments = useMemo(
+    () =>
+      [...experiments]
+        .sort((a, b) => new Date(b.raw.updated_at).getTime() - new Date(a.raw.updated_at).getTime())
+        .slice(0, 5),
+    [experiments]
+  );
 
   const connectors: ConnectorState[] = useMemo(() => {
     return connectorRegistry.map((connector) => {
@@ -266,24 +285,42 @@ export function WorkspaceApp({ initialDesktopShell = false }: { initialDesktopSh
     setActivity((items) => [{ id, message: `${todayStamp()} - ${message}` }, ...items].slice(0, 8));
   }
 
-  function updateExperimentStatus(status: StatusLabel) {
-    if (!selectedExperiment || !headVersion) return;
-    if (!canTransitionExperiment(headVersion.status, status)) {
-      log(`Blocked ${selectedExperiment.id} transition from ${headVersion.status} to ${status}`);
-      return;
+  function openLabNotebook(experimentId?: string, workspaceId?: string) {
+    if (experimentId) {
+      setSelectedExperimentId(experimentId);
     }
+    if (workspaceId) {
+      setResumeWorkspaceId(workspaceId);
+      setResumeNonce((nonce) => nonce + 1);
+    }
+    setActiveView("experiments");
+  }
 
-    updateVersionStatusMutation.mutate(
-      { experimentId: selectedExperiment.id, versionId: headVersion.id, status },
-      {
-        onSuccess: (version) => {
-          log(`${selectedExperiment.id} v${version.versionNumber} marked ${version.status}`);
-        },
-        onError: (error) => {
-          log(error instanceof Error ? error.message : `Failed to update ${selectedExperiment.id}`);
+  function resumeWorkspace(workspaceId: string) {
+    setResumeWorkspaceId(workspaceId);
+    setResumeNonce((nonce) => nonce + 1);
+    setActiveView("experiments");
+    log("Resumed workspace in lab notebook");
+  }
+
+  const clearResumeWorkspace = useCallback(() => {
+    setResumeWorkspaceId(undefined);
+  }, []);
+
+  function confirmDeleteWorkspace() {
+    if (!deleteWorkspaceTarget) return;
+    const target = deleteWorkspaceTarget;
+    deleteWorkspace.mutate(target.id, {
+      onSuccess: () => {
+        log(`Deleted workspace ${target.name}`);
+        setDeleteWorkspaceTarget(null);
+        if (resumeWorkspaceId === target.id) {
+          setResumeWorkspaceId(undefined);
         }
-      }
-    );
+      },
+      onError: (error) =>
+        log(error instanceof Error ? error.message : "Failed to delete workspace")
+    });
   }
 
   function consumeReagent(id: string) {
@@ -557,69 +594,173 @@ export function WorkspaceApp({ initialDesktopShell = false }: { initialDesktopSh
           {activeView === "workspace" && (
             <div className="mt-6 grid gap-4">
               <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-                <Metric icon={FlaskConical} label="Open experiments" value={String(displayExperiments.length)} />
-                <Metric icon={Dna} label="Sequence length" value={`${sequenceStats.length} bp`} />
-                <Metric icon={TestTube2} label="Low stock items" value={String(inventory.filter((item) => item.status !== "OK").length)} />
-                <Metric icon={Network} label="Enabled connectors" value={String(connectors.filter((item) => item.enabled).length)} />
+                <Metric icon={LayoutGrid} label="Workspaces" value={String(workspaces.length)} />
+                <Metric icon={ClipboardList} label="Projects" value={String(orgProjects.length)} />
+                <Metric icon={FlaskConical} label="Experiments" value={String(experiments.length)} />
+                <Metric icon={TestTube2} label="Samples" value={String(sampleCount)} />
               </div>
 
-              <section className="rounded-md border border-black/10 bg-white p-4 shadow-sm">
-                <div className="mb-4 flex items-center justify-between gap-3">
-                  <h2 className="text-sm font-semibold text-ink">Diagnostic workflow</h2>
-                  <button
-                    onClick={() => {
-                      setWorkflowStep((step) => {
-                        const nextStep = Math.min(workflow.length - 1, step + 1);
-                        if (nextStep !== step) {
-                          log(`Workflow advanced to ${workflow[nextStep]}`);
-                        }
-                        return nextStep;
-                      });
-                    }}
-                    disabled={workflowStep === workflow.length - 1}
-                    className="inline-flex items-center gap-2 rounded-md border border-black/10 px-3 py-2 text-xs font-medium hover:bg-black/5 disabled:cursor-not-allowed disabled:bg-black/5 disabled:text-black/40"
-                  >
-                    <Play size={14} />
-                    Advance
-                  </button>
-                </div>
-                <div className="grid gap-2 md:grid-cols-7">
-                  {workflow.map((step, index) => (
-                    <button
-                      key={step}
-                      onClick={() => {
-                        setWorkflowStep(index);
-                        log(`Workflow set to ${step}`);
-                      }}
-                      className={`min-h-20 rounded-md border p-3 text-left transition ${
-                        index === workflowStep
-                          ? "border-fern bg-[#edf5ef]"
-                          : index < workflowStep
-                            ? "border-signal/30 bg-[#eef6f7]"
-                            : "border-black/10 bg-[#fbfbf8]"
-                      }`}
-                    >
-                      <div className="text-xs font-medium text-signal">0{index + 1}</div>
-                      <div className="mt-2 text-sm font-medium text-ink">{step}</div>
-                    </button>
-                  ))}
-                </div>
-              </section>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  onClick={() => setShowWorkspaceCreate((open) => !open)}
+                  className="inline-flex items-center gap-2 rounded-md bg-fern px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-[#1d513c]"
+                >
+                  <Plus size={16} />
+                  Create workspace
+                </button>
+                <button
+                  onClick={() => openLabNotebook()}
+                  className="inline-flex items-center gap-2 rounded-md border border-black/10 px-4 py-2 text-sm font-medium hover:bg-black/5"
+                >
+                  <FlaskConical size={16} />
+                  Open lab notebook
+                </button>
+                <button
+                  onClick={() => {
+                    setActiveView("experiments");
+                    setNewExperimentNonce((nonce) => nonce + 1);
+                  }}
+                  className="inline-flex items-center gap-2 rounded-md border border-black/10 px-4 py-2 text-sm font-medium hover:bg-black/5"
+                >
+                  <Plus size={16} />
+                  New experiment
+                </button>
+              </div>
+
+              {showWorkspaceCreate ? (
+                <WorkspaceCreateForm
+                  pending={createWorkspace.isPending}
+                  onCancel={() => setShowWorkspaceCreate(false)}
+                  onSubmit={(values) => {
+                    if (!primaryOrganizationId) return;
+                    createWorkspace.mutate(
+                      {
+                        organizationId: primaryOrganizationId,
+                        name: values.name,
+                        category: values.category,
+                        subcategory: values.subcategory
+                      },
+                      {
+                        onSuccess: (workspace) => {
+                          log(`Created workspace ${workspace.name}`);
+                          setShowWorkspaceCreate(false);
+                          resumeWorkspace(workspace.id);
+                        },
+                        onError: (error) =>
+                          log(error instanceof Error ? error.message : "Failed to create workspace")
+                      }
+                    );
+                  }}
+                />
+              ) : null}
 
               <div className="grid gap-4 xl:grid-cols-[1.2fr_0.8fr]">
-                {selectedExperiment ? (
-                  <ExperimentPanel
-                    experiment={selectedExperiment}
-                    version={headVersion}
-                    onReview={() => updateExperimentStatus("In review")}
-                    onSign={() => updateExperimentStatus("Signed")}
-                  />
-                ) : (
+                <div className="grid gap-4">
                   <section className="rounded-md border border-black/10 bg-white p-4 shadow-sm">
-                    <h2 className="text-sm font-semibold text-ink">No experiments yet</h2>
-                    <p className="mt-2 text-sm text-graphite">Create a draft experiment to populate the workspace.</p>
+                    <div className="mb-3 flex items-center justify-between gap-3">
+                      <h2 className="text-sm font-semibold text-ink">Workspaces</h2>
+                      <button
+                        onClick={() => openLabNotebook()}
+                        className="text-xs font-medium text-fern hover:underline"
+                      >
+                        Open lab
+                      </button>
+                    </div>
+                    {workspacesQuery.isLoading ? (
+                      <p className="inline-flex items-center gap-2 text-xs text-graphite">
+                        <LoaderCircle size={14} className="animate-spin" /> Loading workspaces…
+                      </p>
+                    ) : workspaces.length === 0 ? (
+                      <div className="grid gap-2">
+                        <p className="text-sm text-graphite">
+                          No workspaces yet. Create one above or seed the defaults.
+                        </p>
+                        <button
+                          onClick={() =>
+                            primaryOrganizationId && seedWorkspaces.mutate(primaryOrganizationId)
+                          }
+                          disabled={!primaryOrganizationId || seedWorkspaces.isPending}
+                          className="inline-flex w-fit items-center gap-2 rounded-md border border-black/10 px-3 py-2 text-xs font-medium hover:bg-black/5 disabled:cursor-not-allowed"
+                        >
+                          {seedWorkspaces.isPending ? (
+                            <LoaderCircle size={14} className="animate-spin" />
+                          ) : (
+                            <LayoutGrid size={14} />
+                          )}
+                          Seed default workspaces
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="grid gap-2">
+                        {workspaces.map((workspace) => (
+                          <div
+                            key={workspace.id}
+                            className="rounded-md border border-black/10 px-3 py-2"
+                          >
+                            <div className="flex flex-wrap items-start justify-between gap-2">
+                              <div>
+                                <div className="text-sm font-medium text-ink">{workspace.name}</div>
+                                <div className="mt-0.5 text-[11px] text-graphite">
+                                  {workspace.subcategory
+                                    ? `${categoryLabel(workspace.category)} · ${workspace.subcategory}`
+                                    : categoryLabel(workspace.category)}
+                                </div>
+                              </div>
+                              <div className="flex flex-wrap gap-1">
+                                <button
+                                  type="button"
+                                  onClick={() => resumeWorkspace(workspace.id)}
+                                  className="rounded-md border border-black/10 px-2 py-1 text-[11px] font-medium hover:bg-black/5"
+                                >
+                                  Resume
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setShareWorkspace(workspace)}
+                                  className="inline-flex items-center gap-1 rounded-md border border-black/10 px-2 py-1 text-[11px] font-medium hover:bg-black/5"
+                                >
+                                  <Share2 size={12} />
+                                  Share
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setDeleteWorkspaceTarget(workspace)}
+                                  className="inline-flex items-center gap-1 rounded-md border border-black/10 px-2 py-1 text-[11px] font-medium text-red-700 hover:bg-red-50"
+                                >
+                                  <Trash2 size={12} />
+                                  Delete
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </section>
-                )}
+
+                  <section className="rounded-md border border-black/10 bg-white p-4 shadow-sm">
+                    <h2 className="mb-3 text-sm font-semibold text-ink">Recent experiments</h2>
+                    {recentExperiments.length === 0 ? (
+                      <p className="text-sm text-graphite">No experiments yet. Create one from the lab notebook.</p>
+                    ) : (
+                      <div className="grid gap-2">
+                        {recentExperiments.map((experiment) => (
+                          <button
+                            key={experiment.id}
+                            onClick={() => openLabNotebook(experiment.id)}
+                            className="rounded-md border border-black/10 px-3 py-2 text-left hover:bg-black/5"
+                          >
+                            <div className="text-sm font-medium text-ink">{experiment.title}</div>
+                            <div className="mt-0.5 text-[11px] text-graphite">
+                              v{experiment.versionCount} · {experiment.updated}
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </section>
+                </div>
+
                 <AgentPanel
                   organizationId={primaryOrganizationId}
                   sessionId={agentSession.sessionId}
@@ -634,6 +775,60 @@ export function WorkspaceApp({ initialDesktopShell = false }: { initialDesktopSh
                   onActivity={log}
                 />
               </div>
+
+              {shareWorkspace ? (
+                <ShareWorkspaceModal
+                  workspace={shareWorkspace}
+                  organizationId={primaryOrganizationId}
+                  onClose={() => setShareWorkspace(null)}
+                  onActivity={log}
+                />
+              ) : null}
+
+              {deleteWorkspaceTarget ? (
+                <div
+                  className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+                  onMouseDown={(event) => {
+                    if (event.target === event.currentTarget) setDeleteWorkspaceTarget(null);
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.key === "Escape") setDeleteWorkspaceTarget(null);
+                  }}
+                >
+                  <div
+                    role="dialog"
+                    aria-modal="true"
+                    aria-labelledby="delete-workspace-title"
+                    className="w-full max-w-md rounded-md border border-black/10 bg-white p-4 shadow-lg"
+                  >
+                    <h2 id="delete-workspace-title" className="text-sm font-semibold text-ink">
+                      Delete workspace?
+                    </h2>
+                    <p className="mt-2 text-sm text-graphite">
+                      This permanently deletes{" "}
+                      <span className="font-medium text-ink">{deleteWorkspaceTarget.name}</span> and
+                      every project, experiment, sample, and dataset under it.
+                    </p>
+                    <div className="mt-4 flex flex-wrap justify-end gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setDeleteWorkspaceTarget(null)}
+                        className="rounded-md border border-black/10 px-3 py-1.5 text-xs font-medium hover:bg-black/5"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="button"
+                        onClick={confirmDeleteWorkspace}
+                        disabled={deleteWorkspace.isPending}
+                        className="rounded-md bg-red-700 px-3 py-1.5 text-xs font-medium text-white hover:bg-red-800 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        {deleteWorkspace.isPending ? "Deleting…" : "Delete workspace"}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ) : null}
             </div>
           )}
 
@@ -645,6 +840,9 @@ export function WorkspaceApp({ initialDesktopShell = false }: { initialDesktopSh
               onSelectExperiment={setSelectedExperimentId}
               onActivity={log}
               newExperimentNonce={newExperimentNonce}
+              resumeWorkspaceId={resumeWorkspaceId}
+              resumeNonce={resumeNonce}
+              onResumeConsumed={clearResumeWorkspace}
             />
           )}
 
@@ -827,65 +1025,5 @@ function Metric({ icon: Icon, label, value }: { icon: LucideIcon; label: string;
       </div>
       <div className="mt-3 text-2xl font-semibold text-ink">{value}</div>
     </div>
-  );
-}
-
-function ExperimentPanel({
-  experiment,
-  version,
-  onReview,
-  onSign
-}: {
-  experiment: ExperimentViewModel;
-  version: VersionViewModel | null;
-  onReview: () => void;
-  onSign: () => void;
-}) {
-  const status = version?.status ?? "Draft";
-  const canSendReview = Boolean(version) && canTransitionExperiment(status, "In review");
-  const canSign = Boolean(version) && canTransitionExperiment(status, "Signed");
-  const blocks = version?.blocks ?? [];
-
-  return (
-    <section className="rounded-md border border-black/10 bg-white p-4 shadow-sm">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h2 className="text-sm font-semibold text-ink">{experiment.title}</h2>
-          <div className="mt-1 text-xs text-graphite">
-            {experiment.id} · {experiment.project} · {status}
-            {version ? ` · v${version.versionNumber} of ${experiment.versionCount}` : ""}
-          </div>
-        </div>
-        <div className="flex gap-2">
-          <button
-            onClick={onReview}
-            disabled={!canSendReview}
-            className="rounded-md border border-black/10 px-3 py-2 text-xs font-medium hover:bg-black/5 disabled:cursor-not-allowed disabled:bg-black/5 disabled:text-black/40"
-          >
-            Send review
-          </button>
-          <button
-            onClick={onSign}
-            disabled={!canSign}
-            className="rounded-md bg-fern px-3 py-2 text-xs font-medium text-white hover:bg-[#1d513c] disabled:cursor-not-allowed disabled:bg-black/20"
-          >
-            Sign
-          </button>
-        </div>
-      </div>
-      <div className="mt-4 grid gap-2">
-        {blocks.length ? (
-          blocks.map((block, index) => (
-            <div key={`${index}-${block}`} className="rounded-md border border-black/10 bg-[#fbfbf8] px-3 py-2 text-sm text-ink">
-              {block}
-            </div>
-          ))
-        ) : (
-          <div className="rounded-md border border-black/10 bg-[#fbfbf8] px-3 py-2 text-sm text-graphite">
-            {version ? "This version has no content blocks." : "Loading version..."}
-          </div>
-        )}
-      </div>
-    </section>
   );
 }

@@ -46,6 +46,53 @@ export interface WorkspaceCreate {
   description?: string | null;
 }
 
+export type WorkspaceShareRole = "viewer" | "editor";
+
+export interface WorkspaceShare {
+  id: string;
+  workspace_id: string;
+  organization_id: string;
+  subject: string;
+  role: WorkspaceShareRole;
+  granted_by: string;
+  created_at: string;
+}
+
+export interface WorkspaceShareCreate {
+  subject: string;
+  role?: WorkspaceShareRole;
+}
+
+export interface WorkspaceShareUpdate {
+  role: WorkspaceShareRole;
+}
+
+export interface WorkspaceInvite {
+  id: string;
+  workspace_id: string;
+  organization_id: string;
+  /** Present only on create responses; list/collaboration redacts this. */
+  token?: string | null;
+  role: WorkspaceShareRole;
+  created_by: string;
+  expires_at: string;
+  revoked_at?: string | null;
+  accepted_count: number;
+  max_uses?: number | null;
+  created_at: string;
+}
+
+export interface WorkspaceInviteCreate {
+  role?: WorkspaceShareRole;
+  expires_in_hours?: number;
+  max_uses?: number | null;
+}
+
+export interface WorkspaceCollaboration {
+  shares: WorkspaceShare[];
+  invites: WorkspaceInvite[];
+}
+
 export type ProjectStatus = "active" | "archived";
 
 export interface Project {

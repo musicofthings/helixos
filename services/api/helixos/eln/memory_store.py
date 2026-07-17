@@ -13,6 +13,8 @@ from helixos.eln.schemas import (
     Project,
     Sample,
     Workspace,
+    WorkspaceInvite,
+    WorkspaceShare,
 )
 from helixos.eln.stores import PlateFullError, WellOccupiedError
 
@@ -27,6 +29,8 @@ class MemoryElnStore:
     def __init__(self) -> None:
         self._lock = threading.RLock()
         self._workspaces: dict[str, Workspace] = {}
+        self._shares: dict[str, WorkspaceShare] = {}
+        self._invites: dict[str, WorkspaceInvite] = {}
         self._projects: dict[str, Project] = {}
         self._experiments: dict[str, Experiment] = {}
         self._versions: dict[str, ExperimentVersion] = {}
@@ -62,7 +66,81 @@ class MemoryElnStore:
             for project_id in project_ids:
                 self._delete_project_subtree(project_id)
                 self._projects.pop(project_id, None)
+            for share_id in [
+                s.id for s in self._shares.values() if s.workspace_id == workspace_id
+            ]:
+                self._shares.pop(share_id, None)
+            for invite_id in [
+                i.id for i in self._invites.values() if i.workspace_id == workspace_id
+            ]:
+                self._invites.pop(invite_id, None)
             self._workspaces.pop(workspace_id, None)
+
+    def create_share(self, share: WorkspaceShare) -> WorkspaceShare:
+        with self._lock:
+            self._shares[share.id] = share
+        return share
+
+    def get_share(self, share_id: str) -> WorkspaceShare | None:
+        return self._shares.get(share_id)
+
+    def list_shares(self, workspace_id: str) -> list[WorkspaceShare]:
+        items = [s for s in self._shares.values() if s.workspace_id == workspace_id]
+        return sorted(items, key=lambda s: s.created_at)
+
+    def delete_share(self, share_id: str) -> None:
+        with self._lock:
+            self._shares.pop(share_id, None)
+
+    def find_share(self, workspace_id: str, subject: str) -> WorkspaceShare | None:
+        for share in self._shares.values():
+            if share.workspace_id == workspace_id and share.subject == subject:
+                return share
+        return None
+
+    def list_shares_for_subject(self, subject: str) -> list[WorkspaceShare]:
+        items = [s for s in self._shares.values() if s.subject == subject]
+        return sorted(items, key=lambda s: s.created_at)
+
+    def update_share(self, share: WorkspaceShare) -> WorkspaceShare:
+        with self._lock:
+            self._shares[share.id] = share
+        return share
+
+    def create_invite(self, invite: WorkspaceInvite) -> WorkspaceInvite:
+        with self._lock:
+            self._invites[invite.id] = invite
+        return invite
+
+    def get_invite(self, invite_id: str) -> WorkspaceInvite | None:
+        return self._invites.get(invite_id)
+
+    def get_invite_by_token(self, token: str) -> WorkspaceInvite | None:
+        for invite in self._invites.values():
+            if invite.token == token:
+                return invite
+        return None
+
+    def list_invites(self, workspace_id: str) -> list[WorkspaceInvite]:
+        items = [i for i in self._invites.values() if i.workspace_id == workspace_id]
+        return sorted(items, key=lambda i: i.created_at, reverse=True)
+
+    def update_invite(self, invite: WorkspaceInvite) -> WorkspaceInvite:
+        with self._lock:
+            self._invites[invite.id] = invite
+        return invite
+
+    def accept_invite(
+        self, invite: WorkspaceInvite, share: WorkspaceShare | None
+    ) -> tuple[WorkspaceInvite, WorkspaceShare | None]:
+        with self._lock:
+            updated = invite.model_copy(
+                update={"accepted_count": invite.accepted_count + 1}
+            )
+            self._invites[updated.id] = updated
+            if share is not None:
+                self._shares[share.id] = share
+            return updated, share
 
     # Projects
     def create_project(self, project: Project) -> Project:
@@ -250,6 +328,14 @@ class MemoryElnStore:
         with self._lock:
             self._samples[sample.id] = sample
         return sample
+
+    def delete_sample(self, sample_id: str) -> None:
+        with self._lock:
+            for dataset_id in [
+                d.id for d in self._datasets.values() if d.sample_id == sample_id
+            ]:
+                self._datasets.pop(dataset_id, None)
+            self._samples.pop(sample_id, None)
 
     # Datasets
     def create_dataset(self, dataset: Dataset) -> Dataset:

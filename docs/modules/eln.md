@@ -32,10 +32,18 @@ A workspace is created by choosing a `category`; some categories carry an option
 
 The suggested subcategory lists live in `CATEGORY_SUBCATEGORIES` (`eln/schemas.py`) and are mirrored in the web create-workspace form. They are advisory: `subcategory` is stored as a free string, and the form's "Other…" option lets labs add their own (e.g. new Programmable Bio assays) without a schema change. `genomics` and `cell_biology` are retained only so workspaces saved under the earlier taxonomy still load.
 
-### Creating, resuming, and deleting workspaces
+### Creating, resuming, deleting, and sharing workspaces
 
-Workspaces are managed from the lab navigator: create (choose category → subcategory), resume (select an existing workspace to keep working in it), and delete. **Experiments are always created nested under a project**, never directly at the workspace level. `DELETE` on a workspace, project, or experiment cascades to everything beneath it in one transaction (the web UI requires an explicit confirmation).
+Workspaces are managed from the **Workspace** tab and the lab navigator:
 
+- **Create** — choose category → subcategory (shared taxonomy form).
+- **Resume** — one-shot select in the lab notebook (does not stick across later refetches).
+- **Delete** — confirmation dialog; cascades the full subtree (and cleans up shares/invites). Owner/org members only.
+- **Share** — collaborator grants (`viewer` \| `editor`) and invite links. Invite accept URLs are shown once at create time; list responses redact tokens. Accepting an invite creates a grant and surfaces the workspace in the actor's list even without org membership (shared-with-me).
+
+**Access model:** org members are workspace owners. Share-only **viewers** can read the subtree; **editors** can mutate under the workspace but cannot delete the workspace or manage shares.
+
+**Experiments are always created nested under a project** in the UI. `DELETE` on a workspace, project, or experiment cascades to everything beneath it in one transaction (the web UI requires an explicit confirmation).
 ## Experiment Versioning ("git for experiments")
 
 - An **Experiment** is a container with a `head_version_id` and `version_count`.
@@ -48,6 +56,9 @@ Workspaces are managed from the lab navigator: create (choose category → subca
 - An experiment holds at most **96 samples** (a standard 96-well plate).
 - `well_position` is optional; when set it must be a valid coordinate on an 8×12 plate (`A1`–`H12`), normalized to upper-case, and unique within the experiment.
 - `sample_type`: `dna`, `rna`, `protein`, `cell`, `tissue`, `reagent`, `other`.
+- `sample_status`: `planned`, `active`, `consumed`, `archived`.
+- Samples can be updated (`PATCH`) including moving wells, and deleted (`DELETE`) with cascade to attached datasets.
+- Plate UX: empty well → add form; with a sample selected, empty well offers **Move here** or **Add new**.
 
 ## Datasets
 
@@ -59,12 +70,17 @@ Text · Table · Protocol steps · Reagent list · Sequence · Image · Chart ·
 
 ## User Surface
 
-The web workspace **Lab notebook** tab (the default landing view) calls this module via `packages/api-client`:
+Two related web surfaces:
+
+- **Workspace** — org-level overview: ELN counts, Create / Resume / Share / Delete for workspaces, recent experiments, and the Agent panel. Does not host experiment editing.
+- **Lab notebook** (default landing) — the ELN workbench (`LabView`): Workspace → Project → Experiment hierarchy, versioning, 96-well plate, and sample/dataset management. Accepts `resumeWorkspaceId` from the Workspace tab.
+Lab notebook API usage via `packages/api-client`:
 
 - Create experiment → `POST /api/v1/experiments` (creates version 1)
 - List experiments → `GET /api/v1/experiments`
 - Load version history / HEAD content → `GET /api/v1/experiments/{id}/versions`
 - Send for review / sign → `PATCH /api/v1/experiments/{id}/versions/{version_id}`
+- Update / delete samples → `PATCH` / `DELETE /api/v1/samples/{id}`
 
 The **Agent panel** can include `experiment_id` and `experiment_title` in run context ([ai.md](ai.md)).
 
@@ -79,7 +95,9 @@ The ELN persists through SQLAlchemy (Postgres in production, SQLite for local/de
 ## Audit And Permissions
 
 All mutations are tenant-scoped through the [auth](auth.md) actor and recorded in [audit](audit.md):
-`eln.workspace_created`, `eln.workspace_deleted`, `eln.workspaces_seeded`, `eln.project_created`,
-`eln.project_updated`, `eln.project_deleted`, `eln.experiment_created`, `eln.experiment_deleted`,
-`eln.experiment_version_committed`, `eln.experiment_version_status_changed`,
-`eln.sample_created`, `eln.sample_updated`, `eln.dataset_created`. Agent runs that reference experiments emit `ai.*` audit events.
+`eln.workspace_created`, `eln.workspace_deleted`, `eln.workspaces_seeded`,
+`eln.workspace_share_granted`, `eln.workspace_share_updated`, `eln.workspace_share_revoked`,
+`eln.workspace_invite_created`, `eln.workspace_invite_revoked`, `eln.workspace_invite_accepted`,
+`eln.project_created`, `eln.project_updated`, `eln.project_deleted`, `eln.experiment_created`,
+`eln.experiment_deleted`, `eln.experiment_version_committed`, `eln.experiment_version_status_changed`,
+`eln.sample_created`, `eln.sample_updated`, `eln.sample_deleted`, `eln.dataset_created`. Agent runs that reference experiments emit `ai.*` audit events.

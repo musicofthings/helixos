@@ -211,6 +211,372 @@ def test_cross_tenant_delete_is_blocked(client: TestClient) -> None:
 
 
 @pytest.mark.parametrize("client", CLIENT_FIXTURES, indirect=True)
+def test_workspace_share_grant_and_revoke(client: TestClient) -> None:
+    workspace = client.post(
+        "/api/v1/workspaces",
+        headers=ORG_DEMO_HEADERS,
+        json={"organization_id": "org_demo", "name": "Shared", "category": "custom"},
+    ).json()
+    share = client.post(
+        f"/api/v1/workspaces/{workspace['id']}/shares",
+        headers=ORG_DEMO_HEADERS,
+        json={"subject": "scientist@lab.example", "role": "editor"},
+    )
+    assert share.status_code == 201, share.text
+    body = share.json()
+    assert body["subject"] == "scientist@lab.example"
+    assert body["role"] == "editor"
+
+    listed = client.get(
+        f"/api/v1/workspaces/{workspace['id']}/shares", headers=ORG_DEMO_HEADERS
+    ).json()
+    assert len(listed["shares"]) == 1
+    assert listed["invites"] == []
+
+    patched = client.patch(
+        f"/api/v1/workspaces/{workspace['id']}/shares/{body['id']}",
+        headers=ORG_DEMO_HEADERS,
+        json={"role": "viewer"},
+    )
+    assert patched.status_code == 200
+    assert patched.json()["role"] == "viewer"
+
+    invalid_subject = client.post(
+        f"/api/v1/workspaces/{workspace['id']}/shares",
+        headers=ORG_DEMO_HEADERS,
+        json={"subject": "not-a-valid-subject", "role": "viewer"},
+    )
+    assert invalid_subject.status_code == 422
+
+    dup = client.post(
+        f"/api/v1/workspaces/{workspace['id']}/shares",
+        headers=ORG_DEMO_HEADERS,
+        json={"subject": "scientist@lab.example", "role": "viewer"},
+    )
+    assert dup.status_code == 409
+
+    revoked = client.delete(
+        f"/api/v1/workspaces/{workspace['id']}/shares/{body['id']}",
+        headers=ORG_DEMO_HEADERS,
+    )
+    assert revoked.status_code == 204
+    listed_after = client.get(
+        f"/api/v1/workspaces/{workspace['id']}/shares", headers=ORG_DEMO_HEADERS
+    ).json()
+    assert listed_after["shares"] == []
+
+
+@pytest.mark.parametrize("client", CLIENT_FIXTURES, indirect=True)
+def test_workspace_invite_create_accept_and_revoke(client: TestClient) -> None:
+    workspace = client.post(
+        "/api/v1/workspaces",
+        headers=ORG_DEMO_HEADERS,
+        json={"organization_id": "org_demo", "name": "Invite me", "category": "custom"},
+    ).json()
+    invite = client.post(
+        f"/api/v1/workspaces/{workspace['id']}/invites",
+        headers=ORG_DEMO_HEADERS,
+        json={"role": "viewer", "expires_in_hours": 24, "max_uses": 5},
+    )
+    assert invite.status_code == 201, invite.text
+    token = invite.json()["token"]
+    assert token
+    assert invite.json()["max_uses"] == 5
+
+    # List redacts the capability token.
+    collab_before = client.get(
+        f"/api/v1/workspaces/{workspace['id']}/shares", headers=ORG_DEMO_HEADERS
+    ).json()
+    assert collab_before["invites"][0]["token"] is None
+
+    accepted = client.post(
+        f"/api/v1/workspace-invites/{token}/accept",
+        headers=ORG_DEMO_HEADERS,
+    )
+    assert accepted.status_code == 201
+    assert accepted.json()["subject"] == "user_demo_scientist"
+    assert accepted.json()["role"] == "viewer"
+
+    collab = client.get(
+        f"/api/v1/workspaces/{workspace['id']}/shares", headers=ORG_DEMO_HEADERS
+    ).json()
+    assert len(collab["shares"]) == 1
+    assert collab["invites"][0]["accepted_count"] == 1
+    assert collab["invites"][0]["token"] is None
+
+    # Accepting again is idempotent for the grant.
+    again = client.post(
+        f"/api/v1/workspace-invites/{token}/accept",
+        headers=ORG_DEMO_HEADERS,
+    )
+    assert again.status_code == 201
+    collab2 = client.get(
+        f"/api/v1/workspaces/{workspace['id']}/shares", headers=ORG_DEMO_HEADERS
+    ).json()
+    assert len(collab2["shares"]) == 1
+    assert collab2["invites"][0]["accepted_count"] == 2
+
+    revoked = client.delete(
+        f"/api/v1/workspaces/{workspace['id']}/invites/{invite.json()['id']}",
+        headers=ORG_DEMO_HEADERS,
+    )
+    assert revoked.status_code == 204
+    inactive = client.post(
+        f"/api/v1/workspace-invites/{token}/accept",
+        headers=ORG_DEMO_HEADERS,
+    )
+    assert inactive.status_code == 410
+
+
+@pytest.mark.parametrize("client", CLIENT_FIXTURES, indirect=True)
+def test_workspace_delete_cascades_shares_and_invites(client: TestClient) -> None:
+    workspace = client.post(
+        "/api/v1/workspaces",
+        headers=ORG_DEMO_HEADERS,
+        json={"organization_id": "org_demo", "name": "Gone", "category": "custom"},
+    ).json()
+    share = client.post(
+        f"/api/v1/workspaces/{workspace['id']}/shares",
+        headers=ORG_DEMO_HEADERS,
+        json={"subject": "peer@lab.example", "role": "viewer"},
+    )
+    assert share.status_code == 201
+    invite = client.post(
+        f"/api/v1/workspaces/{workspace['id']}/invites",
+        headers=ORG_DEMO_HEADERS,
+        json={"role": "editor"},
+    )
+    assert invite.status_code == 201
+    assert (
+        client.delete(
+            f"/api/v1/workspaces/{workspace['id']}", headers=ORG_DEMO_HEADERS
+        ).status_code
+        == 204
+    )
+    assert (
+        client.get(
+            f"/api/v1/workspaces/{workspace['id']}/shares", headers=ORG_DEMO_HEADERS
+        ).status_code
+        == 404
+    )
+    assert (
+        client.post(
+            f"/api/v1/workspace-invites/{invite.json()['token']}/accept",
+            headers=ORG_DEMO_HEADERS,
+        ).status_code
+        == 404
+    )
+
+
+@pytest.mark.parametrize("client", CLIENT_FIXTURES, indirect=True)
+def test_cross_tenant_share_is_blocked(client: TestClient) -> None:
+    workspace = client.post(
+        "/api/v1/workspaces",
+        headers=ADMIN_HEADERS,
+        json={"organization_id": "org_qc", "name": "QC Share", "category": "custom"},
+    ).json()
+    forbidden = client.post(
+        f"/api/v1/workspaces/{workspace['id']}/shares",
+        headers=ORG_DEMO_HEADERS,
+        json={"subject": "peer@lab.example", "role": "viewer"},
+    )
+    assert forbidden.status_code == 403
+
+
+@pytest.mark.parametrize("client", CLIENT_FIXTURES, indirect=True)
+def test_invite_accept_grants_shared_workspace_access(client: TestClient) -> None:
+    """Accepting an invite to another org's workspace enables shared-with-me access."""
+    workspace = client.post(
+        "/api/v1/workspaces",
+        headers=ADMIN_HEADERS,
+        json={"organization_id": "org_qc", "name": "QC Shared", "category": "custom"},
+    ).json()
+    project = client.post(
+        "/api/v1/projects",
+        headers=ADMIN_HEADERS,
+        json={
+            "organization_id": "org_qc",
+            "workspace_id": workspace["id"],
+            "name": "QC Project",
+        },
+    ).json()
+    invite = client.post(
+        f"/api/v1/workspaces/{workspace['id']}/invites",
+        headers=ADMIN_HEADERS,
+        json={"role": "viewer", "expires_in_hours": 24},
+    ).json()
+
+    # Demo scientist is not an org_qc member until they accept.
+    assert (
+        client.get(
+            f"/api/v1/workspaces/{workspace['id']}", headers=ORG_DEMO_HEADERS
+        ).status_code
+        == 403
+    )
+
+    accepted = client.post(
+        f"/api/v1/workspace-invites/{invite['token']}/accept",
+        headers=ORG_DEMO_HEADERS,
+    )
+    assert accepted.status_code == 201
+
+    visible = client.get("/api/v1/workspaces", headers=ORG_DEMO_HEADERS).json()
+    assert any(item["id"] == workspace["id"] for item in visible)
+
+    assert (
+        client.get(
+            f"/api/v1/workspaces/{workspace['id']}", headers=ORG_DEMO_HEADERS
+        ).status_code
+        == 200
+    )
+    projects = client.get(
+        f"/api/v1/projects?workspace_id={workspace['id']}", headers=ORG_DEMO_HEADERS
+    )
+    assert projects.status_code == 200
+    assert len(projects.json()) == 1
+
+    # Viewer cannot create under the shared workspace.
+    create_blocked = client.post(
+        "/api/v1/projects",
+        headers=ORG_DEMO_HEADERS,
+        json={
+            "organization_id": "org_qc",
+            "workspace_id": workspace["id"],
+            "name": "Nope",
+        },
+    )
+    assert create_blocked.status_code == 403
+
+    # Viewer cannot manage shares (owner-only).
+    assert (
+        client.get(
+            f"/api/v1/workspaces/{workspace['id']}/shares", headers=ORG_DEMO_HEADERS
+        ).status_code
+        == 403
+    )
+    assert project["id"]  # keep fixture used / silence lint
+
+
+@pytest.mark.parametrize("client", CLIENT_FIXTURES, indirect=True)
+def test_delete_sample_cascades_datasets(client: TestClient) -> None:
+    experiment = _create_experiment(client)
+    sample = client.post(
+        "/api/v1/samples",
+        headers=ORG_DEMO_HEADERS,
+        json={
+            "organization_id": "org_demo",
+            "experiment_id": experiment["id"],
+            "name": "Colony",
+            "sample_type": "dna",
+            "well_position": "A1",
+        },
+    ).json()
+    dataset = client.post(
+        "/api/v1/datasets",
+        headers=ORG_DEMO_HEADERS,
+        json={
+            "organization_id": "org_demo",
+            "sample_id": sample["id"],
+            "name": "Sanger",
+            "dataset_type": "dna_sequence",
+        },
+    ).json()
+
+    deleted = client.delete(
+        f"/api/v1/samples/{sample['id']}", headers=ORG_DEMO_HEADERS
+    )
+    assert deleted.status_code == 204
+    assert (
+        client.get(
+            f"/api/v1/samples/{sample['id']}", headers=ORG_DEMO_HEADERS
+        ).status_code
+        == 404
+    )
+    assert (
+        client.get(
+            f"/api/v1/datasets/{dataset['id']}", headers=ORG_DEMO_HEADERS
+        ).status_code
+        == 404
+    )
+    remaining = client.get(
+        f"/api/v1/experiments/{experiment['id']}/samples", headers=ORG_DEMO_HEADERS
+    ).json()
+    assert remaining == []
+
+
+@pytest.mark.parametrize("client", CLIENT_FIXTURES, indirect=True)
+def test_cross_tenant_sample_delete_is_blocked(client: TestClient) -> None:
+    experiment = client.post(
+        "/api/v1/experiments",
+        headers=ADMIN_HEADERS,
+        json={"organization_id": "org_qc", "name": "QC plate", "blocks": []},
+    ).json()
+    sample = client.post(
+        "/api/v1/samples",
+        headers=ADMIN_HEADERS,
+        json={
+            "organization_id": "org_qc",
+            "experiment_id": experiment["id"],
+            "name": "QC1",
+            "sample_type": "dna",
+        },
+    ).json()
+
+    forbidden = client.delete(
+        f"/api/v1/samples/{sample['id']}", headers=ORG_DEMO_HEADERS
+    )
+    assert forbidden.status_code == 403
+    assert (
+        client.get(
+            f"/api/v1/samples/{sample['id']}", headers=ADMIN_HEADERS
+        ).status_code
+        == 200
+    )
+
+
+@pytest.mark.parametrize("client", CLIENT_FIXTURES, indirect=True)
+def test_sample_well_move_and_duplicate_still_blocked(client: TestClient) -> None:
+    experiment_id = _create_experiment(client)["id"]
+    first = client.post(
+        "/api/v1/samples",
+        headers=ORG_DEMO_HEADERS,
+        json={
+            "organization_id": "org_demo",
+            "experiment_id": experiment_id,
+            "name": "s1",
+            "well_position": "A1",
+        },
+    ).json()
+    second = client.post(
+        "/api/v1/samples",
+        headers=ORG_DEMO_HEADERS,
+        json={
+            "organization_id": "org_demo",
+            "experiment_id": experiment_id,
+            "name": "s2",
+            "well_position": "A2",
+        },
+    ).json()
+
+    moved = client.patch(
+        f"/api/v1/samples/{first['id']}",
+        headers=ORG_DEMO_HEADERS,
+        json={"well_position": "B3"},
+    )
+    assert moved.status_code == 200
+    assert moved.json()["well_position"] == "B3"
+
+    clash = client.patch(
+        f"/api/v1/samples/{first['id']}",
+        headers=ORG_DEMO_HEADERS,
+        json={"well_position": "A2"},
+    )
+    assert clash.status_code == 409
+    assert clash.json()["error"]["code"] == "well_occupied"
+    assert second["well_position"] == "A2"
+
+
+@pytest.mark.parametrize("client", CLIENT_FIXTURES, indirect=True)
 def test_full_hierarchy_create_and_read(client: TestClient) -> None:
     workspace = client.post(
         "/api/v1/workspaces",
