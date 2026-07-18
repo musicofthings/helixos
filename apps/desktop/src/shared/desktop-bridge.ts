@@ -23,3 +23,6 @@ export type SidecarStatusEvent = {
   apiBaseUrl?: string;
   message?: string;
 };
+
+/** DOM event name dispatched on the page window when sidecar status changes. */
+export const HELIX_SIDECAR_STATUS_EVENT = "helix:sidecar-status-changed";

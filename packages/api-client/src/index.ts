@@ -18,6 +18,10 @@ import type {
   Project,
   ProjectCreate,
   ProjectUpdate,
+  Protocol,
+  ProtocolCreate,
+  ProtocolImportRequest,
+  ProtocolUpdate,
   Sample,
   SampleCreate,
   SampleUpdate,
@@ -194,6 +198,41 @@ export class HelixOSClient {
 
   deleteProject(projectId: string): Promise<void> {
     return this.request(`/api/v1/projects/${encodeURIComponent(projectId)}`, { method: "DELETE" });
+  }
+
+  // --- Protocols --------------------------------------------------------- //
+  listProtocols(params?: { organizationId?: string; workspaceId?: string }): Promise<Protocol[]> {
+    const search = new URLSearchParams();
+    if (params?.organizationId) search.set("organization_id", params.organizationId);
+    if (params?.workspaceId) search.set("workspace_id", params.workspaceId);
+    const query = search.toString();
+    return this.request(`/api/v1/protocols${query ? `?${query}` : ""}`);
+  }
+
+  createProtocol(payload: ProtocolCreate): Promise<Protocol> {
+    return this.request("/api/v1/protocols", { method: "POST", body: JSON.stringify(payload) });
+  }
+
+  importProtocol(payload: ProtocolImportRequest): Promise<Protocol> {
+    return this.request("/api/v1/protocols/import", {
+      method: "POST",
+      body: JSON.stringify(payload)
+    });
+  }
+
+  getProtocol(protocolId: string): Promise<Protocol> {
+    return this.request(`/api/v1/protocols/${encodeURIComponent(protocolId)}`);
+  }
+
+  updateProtocol(protocolId: string, payload: ProtocolUpdate): Promise<Protocol> {
+    return this.request(`/api/v1/protocols/${encodeURIComponent(protocolId)}`, {
+      method: "PATCH",
+      body: JSON.stringify(payload)
+    });
+  }
+
+  deleteProtocol(protocolId: string): Promise<void> {
+    return this.request(`/api/v1/protocols/${encodeURIComponent(protocolId)}`, { method: "DELETE" });
   }
 
   // --- Experiments + versions -------------------------------------------- //

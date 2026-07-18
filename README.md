@@ -8,24 +8,37 @@ HelixOS combines ELN, molecular biology tooling, AI copilots, MCP connectors, an
 
 **Resuming work?** Read [SESSION_HANDOVER.md](SESSION_HANDOVER.md) for current state, uncommitted changes, and production next steps.
 
-## Current Status (June 2026)
+## Current Status (July 2026)
 
-Local dev is working end-to-end. The workspace UI is wired to the API for organizations, ELN create/list/status, sequence metadata, AI agent sessions (SSE), MCP connector jobs (desktop), and hash-chained audit events.
+Local browser and desktop stacks work end-to-end. The shared web app (`apps/web`) powers both surfaces with a **Slack-style workspace shell**: workspaces are sidebar channels; create/select opens a workspace home; Lab notebook and other tools are scoped to the active workspace.
 
 | Area | Status |
 | --- | --- |
 | Browser dev stack | Working (`npm run dev:browser`) |
 | Desktop dev stack | Working (`npm run dev:desktop`) |
-| API tests | 26 passing (`npm run test:api`) |
+| Packaged desktop (local) | Working (`cd apps/desktop && npm run pack`) — static UI over loopback + API proxy/CORS |
+| Workspace shell | Slack-style channels + workspace home + scoped lab notebook |
+| Workspace share / invites | Working (viewer/editor grants, invite links) |
+| ELN protocols library | In progress (CRUD + import stubs) |
+| API tests | See `npm run test:api` |
 | Documentation | Connected hub at [docs/README.md](docs/README.md) |
 | Production deploy | Not yet — see [SESSION_HANDOVER.md](SESSION_HANDOVER.md) |
 
-**Not production-ready yet:** durable ELN/inventory persistence, JWT/OIDC auth, Postgres migrations, packaged desktop release pipeline, and inventory/biobank/workflows backend modules.
+**Not production-ready yet:** JWT/OIDC auth, Postgres migrations for all environments, notarized desktop release pipeline, and inventory/biobank/workflows backend modules.
+
+## Workspace UI (shared web + desktop)
+
+Both `npm run dev:browser` and the desktop shell load the same Next.js app:
+
+- **Sidebar — Workspaces** — channel list + create (`+`). Selecting a channel opens that workspace’s **home** (projects, recent experiments, Share / Delete / Open lab, Agent).
+- **Sidebar — Tools** — Lab notebook (scoped to the active workspace), Protocols, Sequences, Inventory, Connectors.
+- **Lab notebook** — Project → Experiment only for the active workspace (no nested workspace switcher).
+- **Desktop extras** — API sidecar status badge, MCP stdio connectors (e.g. BioPython Local), packaged static export served over loopback with `/api` proxied to the sidecar.
 
 ## Repository Layout
 
 ```txt
-apps/web/       Next.js workspace UI
+apps/web/       Next.js workspace UI (browser + desktop)
 apps/desktop/   Electron shell + sidecar + MCP bridge
 services/api/   FastAPI backend (helixos.* domains)
 packages/       Shared TypeScript (api-client, types)
@@ -43,7 +56,15 @@ scripts/        Dev setup and orchestration scripts
 npm run setup        # once: venv, npm deps, .env.local
 npm run dev:browser  # API :8000 + web :3000
 npm run dev:desktop  # Electron + sidecar :8765 + MCP :8766 + web :3000
-npm run test:api     # pytest (26 tests)
+npm run test:api     # pytest
+```
+
+Packaged local desktop:
+
+```bash
+cd apps/desktop
+npm run pack
+open release/mac/HelixOS.app
 ```
 
 | Surface | URL |
@@ -60,7 +81,7 @@ Demo bearer tokens:
 | `org-demo-token` | `org_demo` |
 | `demo-admin-token` | `org_demo`, `org_qc` |
 
-Set `HELIX_DATABASE_URL=sqlite:///$(pwd)/.data/helixos-dev.db` for persistent audit in browser dev (desktop sets this automatically).
+Set `HELIX_DATABASE_URL=sqlite:///$(pwd)/.data/helixos-dev.db` for persistent ELN/audit in browser dev (desktop sets a user-data SQLite URL automatically).
 
 ## Documentation Map
 
@@ -74,6 +95,7 @@ Set `HELIX_DATABASE_URL=sqlite:///$(pwd)/.data/helixos-dev.db` for persistent au
 | Domain vocabulary | [DOMAIN_GLOSSARY.md](DOMAIN_GLOSSARY.md) |
 | Contributor / agent rules | [AGENTS.md](AGENTS.md) |
 | Module deep-dives | [docs/modules/](docs/modules/) |
+| Desktop troubleshooting | [docs/modules/desktop.md](docs/modules/desktop.md) |
 | Session handover | [SESSION_HANDOVER.md](SESSION_HANDOVER.md) |
 
 ## MVP Modules
@@ -81,12 +103,12 @@ Set `HELIX_DATABASE_URL=sqlite:///$(pwd)/.data/helixos-dev.db` for persistent au
 Implemented (UI + API where noted):
 
 - [Auth & organizations](docs/modules/auth.md) — demo tokens + tenant scoping
-- [ELN experiment drafts](docs/modules/eln.md) — create, list, status PATCH, audit events
+- [ELN](docs/modules/eln.md) — workspaces (channels + share), projects, versioned experiments, samples/plates, datasets; **protocols library** (CRUD + import stubs)
 - [Sequence metadata](docs/modules/molecular.md) — API metadata + client-side analyzer
 - [AI copilot (SSE)](docs/modules/ai.md) — sessions, streaming runs, audit
 - [MCP connectors](docs/modules/mcp.md) — BioPython local via desktop bridge
 - [Audit trail](docs/modules/audit.md) — hash-chained events (memory / SQLite / Postgres)
-- [Desktop shell](docs/modules/desktop.md) — Electron + sidecar + MCP bridge
+- [Desktop shell](docs/modules/desktop.md) — Electron + sidecar + MCP bridge + packaged static UI
 
 **Prototype only:** inventory tab (local state, no API). Planned: biobank, workflows — see [docs/OVERVIEW.md](docs/OVERVIEW.md).
 

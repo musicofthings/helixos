@@ -119,6 +119,57 @@ export interface ProjectUpdate {
   status?: ProjectStatus;
 }
 
+export type ProtocolStatus = "draft" | "active" | "archived";
+export type ProtocolSourceProvider = "manual" | "protocols_io" | "url";
+
+export interface ProtocolStep {
+  order: number;
+  title: string;
+  body: string;
+}
+
+export interface Protocol {
+  id: string;
+  organization_id: string;
+  workspace_id: string;
+  name: string;
+  description?: string | null;
+  status: ProtocolStatus;
+  steps: ProtocolStep[];
+  source_provider: ProtocolSourceProvider;
+  source_url?: string | null;
+  source_external_id?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ProtocolCreate {
+  organization_id: string;
+  workspace_id: string;
+  name: string;
+  description?: string | null;
+  steps?: ProtocolStep[];
+  source_provider?: ProtocolSourceProvider;
+  source_url?: string | null;
+  source_external_id?: string | null;
+}
+
+export interface ProtocolUpdate {
+  name?: string;
+  description?: string | null;
+  status?: ProtocolStatus;
+  steps?: ProtocolStep[];
+}
+
+export interface ProtocolImportRequest {
+  organization_id: string;
+  workspace_id: string;
+  source_provider?: ProtocolSourceProvider;
+  source_url?: string | null;
+  source_external_id?: string | null;
+  name?: string | null;
+}
+
 export interface Experiment {
   id: string;
   organization_id: string;

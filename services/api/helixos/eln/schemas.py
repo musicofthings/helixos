@@ -1,7 +1,8 @@
 """Pydantic schemas for the ELN domain hierarchy.
 
 Hierarchy: Workspace -> Project -> Experiment -> ExperimentVersion
-                                              \-> Sample -> Dataset
+                 |                     \-> Sample -> Dataset
+                 └─ Protocol (reusable procedure library)
 
 Experiments are versioned like a source repository: each edit creates an
 immutable ExperimentVersion ("commit") with a parent pointer, and the
@@ -263,6 +264,75 @@ class Project(ProjectCreate):
     status: ProjectStatus = ProjectStatus.ACTIVE
     created_at: datetime = Field(default_factory=_now)
     updated_at: datetime = Field(default_factory=_now)
+
+
+# --------------------------------------------------------------------------- #
+# Protocol library (workspace-scoped)
+# --------------------------------------------------------------------------- #
+class ProtocolStatus(StrEnum):
+    """Lifecycle states for a reusable protocol."""
+
+    DRAFT = "draft"
+    ACTIVE = "active"
+    ARCHIVED = "archived"
+
+
+class ProtocolSourceProvider(StrEnum):
+    """Where a protocol originated."""
+
+    MANUAL = "manual"
+    PROTOCOLS_IO = "protocols_io"
+    URL = "url"
+
+
+class ProtocolStep(BaseModel):
+    """One ordered step in a protocol."""
+
+    order: int = Field(ge=1)
+    title: str = Field(min_length=1)
+    body: str = ""
+
+
+class ProtocolCreate(BaseModel):
+    """Payload for creating a protocol in a workspace library."""
+
+    organization_id: str
+    workspace_id: str
+    name: str = Field(min_length=1)
+    description: str | None = None
+    steps: list[ProtocolStep] = Field(default_factory=list)
+    source_provider: ProtocolSourceProvider = ProtocolSourceProvider.MANUAL
+    source_url: str | None = None
+    source_external_id: str | None = None
+
+
+class ProtocolUpdate(BaseModel):
+    """Payload for updating a protocol's mutable fields."""
+
+    name: str | None = Field(default=None, min_length=1)
+    description: str | None = None
+    status: ProtocolStatus | None = None
+    steps: list[ProtocolStep] | None = None
+
+
+class Protocol(ProtocolCreate):
+    """Persisted reusable protocol."""
+
+    id: str = Field(default_factory=lambda: f"prot_{uuid4().hex}")
+    status: ProtocolStatus = ProtocolStatus.DRAFT
+    created_at: datetime = Field(default_factory=_now)
+    updated_at: datetime = Field(default_factory=_now)
+
+
+class ProtocolImportRequest(BaseModel):
+    """Import a protocol shell from an external source (stubbed fetch)."""
+
+    organization_id: str
+    workspace_id: str
+    source_provider: ProtocolSourceProvider = ProtocolSourceProvider.PROTOCOLS_IO
+    source_url: str | None = None
+    source_external_id: str | None = None
+    name: str | None = Field(default=None, min_length=1)
 
 
 # --------------------------------------------------------------------------- #

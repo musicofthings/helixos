@@ -331,6 +331,113 @@ export function useCreateProject(organizationId?: string) {
   });
 }
 
+export function useProtocols(
+  params: { organizationId?: string; workspaceId?: string },
+  enabled = true
+) {
+  return useQuery({
+    queryKey: ["protocols", params.organizationId, params.workspaceId],
+    enabled: enabled && Boolean(params.organizationId) && Boolean(params.workspaceId),
+    queryFn: async () =>
+      createHelixClient().listProtocols({
+        organizationId: params.organizationId,
+        workspaceId: params.workspaceId
+      })
+  });
+}
+
+export function useCreateProtocol(organizationId?: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: {
+      organizationId: string;
+      workspaceId: string;
+      name: string;
+      description?: string;
+      steps?: Array<{ order: number; title: string; body: string }>;
+    }) =>
+      createHelixClient().createProtocol({
+        organization_id: input.organizationId,
+        workspace_id: input.workspaceId,
+        name: input.name,
+        description: input.description,
+        steps: input.steps
+      }),
+    onSuccess: async (_data, variables) => {
+      await queryClient.invalidateQueries({
+        queryKey: ["protocols", organizationId, variables.workspaceId]
+      });
+      await invalidateAuditEvents(queryClient, organizationId);
+    }
+  });
+}
+
+export function useUpdateProtocol(organizationId?: string, workspaceId?: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: {
+      protocolId: string;
+      name?: string;
+      description?: string | null;
+      status?: "draft" | "active" | "archived";
+      steps?: Array<{ order: number; title: string; body: string }>;
+    }) =>
+      createHelixClient().updateProtocol(input.protocolId, {
+        name: input.name,
+        description: input.description,
+        status: input.status,
+        steps: input.steps
+      }),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({
+        queryKey: ["protocols", organizationId, workspaceId]
+      });
+      await invalidateAuditEvents(queryClient, organizationId);
+    }
+  });
+}
+
+export function useDeleteProtocol(organizationId?: string, workspaceId?: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (protocolId: string) => createHelixClient().deleteProtocol(protocolId),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({
+        queryKey: ["protocols", organizationId, workspaceId]
+      });
+      await invalidateAuditEvents(queryClient, organizationId);
+    }
+  });
+}
+
+export function useImportProtocol(organizationId?: string, workspaceId?: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: {
+      organizationId: string;
+      workspaceId: string;
+      sourceProvider: "protocols_io" | "url";
+      sourceUrl?: string;
+      sourceExternalId?: string;
+      name?: string;
+    }) =>
+      createHelixClient().importProtocol({
+        organization_id: input.organizationId,
+        workspace_id: input.workspaceId,
+        source_provider: input.sourceProvider,
+        source_url: input.sourceUrl,
+        source_external_id: input.sourceExternalId,
+        name: input.name
+      }),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({
+        queryKey: ["protocols", organizationId, workspaceId]
+      });
+      await invalidateAuditEvents(queryClient, organizationId);
+    }
+  });
+}
+
 export function useCommitVersion(organizationId?: string) {
   const queryClient = useQueryClient();
   return useMutation({

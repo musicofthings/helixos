@@ -18,6 +18,7 @@ from helixos.eln.orm import (
     ExperimentORM,
     ExperimentVersionORM,
     ProjectORM,
+    ProtocolORM,
     SampleORM,
     WorkspaceInviteORM,
     WorkspaceORM,
@@ -29,6 +30,8 @@ from helixos.eln.schemas import (
     ExperimentBlock,
     ExperimentVersion,
     Project,
+    Protocol,
+    ProtocolStep,
     Sample,
     Workspace,
     WorkspaceInvite,
@@ -136,6 +139,9 @@ class SqlElnStore:
                 session.query(ProjectORM).filter(
                     ProjectORM.id.in_(project_ids)
                 ).delete(synchronize_session=False)
+            session.query(ProtocolORM).filter(
+                ProtocolORM.workspace_id == workspace_id
+            ).delete(synchronize_session=False)
             session.query(WorkspaceShareORM).filter(
                 WorkspaceShareORM.workspace_id == workspace_id
             ).delete(synchronize_session=False)
@@ -336,6 +342,63 @@ class SqlElnStore:
             project = session.get(ProjectORM, project_id)
             if project is not None:
                 session.delete(project)
+
+    def create_protocol(self, protocol: Protocol) -> Protocol:
+        with session_scope() as session:
+            session.add(
+                ProtocolORM(
+                    id=protocol.id,
+                    organization_id=protocol.organization_id,
+                    workspace_id=protocol.workspace_id,
+                    name=protocol.name,
+                    description=protocol.description,
+                    status=protocol.status.value,
+                    steps=[step.model_dump() for step in protocol.steps],
+                    source_provider=protocol.source_provider.value,
+                    source_url=protocol.source_url,
+                    source_external_id=protocol.source_external_id,
+                    created_at=protocol.created_at,
+                    updated_at=protocol.updated_at,
+                )
+            )
+        return protocol
+
+    def get_protocol(self, protocol_id: str) -> Protocol | None:
+        with session_scope() as session:
+            row = session.get(ProtocolORM, protocol_id)
+            return _to_protocol(row) if row else None
+
+    def list_protocols(
+        self, organization_ids: Sequence[str], workspace_id: str | None = None
+    ) -> list[Protocol]:
+        with session_scope() as session:
+            query = select(ProtocolORM).where(
+                ProtocolORM.organization_id.in_(list(organization_ids))
+            )
+            if workspace_id is not None:
+                query = query.where(ProtocolORM.workspace_id == workspace_id)
+            rows = session.scalars(query.order_by(ProtocolORM.created_at.asc())).all()
+            return [_to_protocol(row) for row in rows]
+
+    def update_protocol(self, protocol: Protocol) -> Protocol:
+        with session_scope() as session:
+            row = session.get(ProtocolORM, protocol.id)
+            if row is not None:
+                row.name = protocol.name
+                row.description = protocol.description
+                row.status = protocol.status.value
+                row.steps = [step.model_dump() for step in protocol.steps]
+                row.source_provider = protocol.source_provider.value
+                row.source_url = protocol.source_url
+                row.source_external_id = protocol.source_external_id
+                row.updated_at = protocol.updated_at
+        return protocol
+
+    def delete_protocol(self, protocol_id: str) -> None:
+        with session_scope() as session:
+            row = session.get(ProtocolORM, protocol_id)
+            if row is not None:
+                session.delete(row)
 
     # Experiments
     def create_experiment_with_version(
@@ -704,6 +767,23 @@ def _to_project(row: ProjectORM) -> Project:
         name=row.name,
         description=row.description,
         status=row.status,
+        created_at=row.created_at,
+        updated_at=row.updated_at,
+    )
+
+
+def _to_protocol(row: ProtocolORM) -> Protocol:
+    return Protocol(
+        id=row.id,
+        organization_id=row.organization_id,
+        workspace_id=row.workspace_id,
+        name=row.name,
+        description=row.description,
+        status=row.status,
+        steps=[ProtocolStep.model_validate(item) for item in (row.steps or [])],
+        source_provider=row.source_provider,
+        source_url=row.source_url,
+        source_external_id=row.source_external_id,
         created_at=row.created_at,
         updated_at=row.updated_at,
     )

@@ -15,6 +15,7 @@ import { McpHostManager } from "./mcp/host-manager";
 import { createMcpBridgeServer } from "./mcp/bridge-server";
 import { apiSidecar } from "./sidecar";
 import { setupAutoUpdater } from "./updater";
+import { webStaticServer } from "./web-static-server";
 import { HELIX_IPC_CHANNELS, type HelixDesktopConfig, type SidecarStatusEvent } from "../shared/desktop-bridge";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -29,10 +30,16 @@ const mcpBridgeToken = randomBytes(32).toString("hex");
 const mcpHostManager = new McpHostManager();
 const mcpBridgeServer = createMcpBridgeServer(mcpHostManager, mcpBridgeToken);
 
+function publicApiBaseUrl(): string {
+  // Packaged UI is served from an ephemeral loopback port. Prefer the static
+  // server origin so renderer fetch stays same-origin via the /api proxy.
+  return webStaticServer.baseUrl ?? buildApiBaseUrl(activeApiPort);
+}
+
 function getBridgeConfig(): HelixDesktopConfig {
   const config = runtimeConfig ?? loadDesktopConfig();
   return {
-    apiBaseUrl: buildApiBaseUrl(activeApiPort),
+    apiBaseUrl: publicApiBaseUrl(),
     apiToken: config.apiToken,
     webBaseUrl: config.webEntry.mode === "url" ? config.webEntry.value : "file://workspace",
     mcpBridgeUrl: buildMcpBridgeUrl(activeMcpBridgePort),
@@ -49,8 +56,27 @@ function broadcastSidecarStatus(event: SidecarStatusEvent): void {
   }
 }
 
+async function resolveWebEntry(config: DesktopRuntimeConfig): Promise<DesktopRuntimeConfig> {
+  // Packaged builds keep the Next export under resources/web. Serve it over
+  // loopback HTTP so absolute "/_next/..." CSS/JS URLs work (file:// does not).
+  if (config.isPackaged && config.webEntry.mode === "file") {
+    const webRoot = path.dirname(config.webEntry.value);
+    await webStaticServer.start(webRoot);
+    webStaticServer.setApiProxyTarget(buildApiBaseUrl(activeApiPort));
+    const baseUrl = webStaticServer.baseUrl;
+    if (!baseUrl) {
+      throw new Error("Packaged web static server failed to start");
+    }
+    return {
+      ...config,
+      webEntry: { mode: "url", value: baseUrl }
+    };
+  }
+  return config;
+}
+
 async function loadWorkspaceWindow(window: BrowserWindow, config: DesktopRuntimeConfig): Promise<void> {
-  const target = buildWebLoadTarget(config.webEntry, buildApiBaseUrl(activeApiPort), config.apiToken);
+  const target = buildWebLoadTarget(config.webEntry, publicApiBaseUrl(), config.apiToken);
   if (target.file) {
     await window.loadFile(target.file, { query: target.query });
     return;
@@ -61,7 +87,7 @@ async function loadWorkspaceWindow(window: BrowserWindow, config: DesktopRuntime
 }
 
 async function createMainWindow(): Promise<void> {
-  runtimeConfig = loadDesktopConfig();
+  runtimeConfig = await resolveWebEntry(loadDesktopConfig());
   refreshMcpPaths(runtimeConfig);
 
   mainWindow = new BrowserWindow({
@@ -114,9 +140,12 @@ function buildSidecarOptions(config: DesktopRuntimeConfig): Parameters<typeof ap
     mcpBridgeToken,
     sidecarEnv: buildSidecarEnvironment(config, buildMcpBridgeUrl(activeMcpBridgePort)),
     onStatus: (status, message) => {
+      if (apiSidecar.apiBaseUrl) {
+        webStaticServer.setApiProxyTarget(apiSidecar.apiBaseUrl);
+      }
       broadcastSidecarStatus({
         status,
-        apiBaseUrl: apiSidecar.apiBaseUrl ?? undefined,
+        apiBaseUrl: publicApiBaseUrl(),
         message
       });
     },
@@ -136,6 +165,7 @@ async function startMcpBridge(config: DesktopRuntimeConfig): Promise<number> {
 
 async function startSidecar(config: DesktopRuntimeConfig): Promise<void> {
   activeApiPort = await apiSidecar.start(buildSidecarOptions(config));
+  webStaticServer.setApiProxyTarget(buildApiBaseUrl(activeApiPort));
 }
 
 function registerIpcHandlers(): void {
@@ -149,6 +179,7 @@ function registerIpcHandlers(): void {
     broadcastSidecarStatus({ status: "starting", message: "Restarting sidecar" });
     activeApiPort = await apiSidecar.restart(buildSidecarOptions(runtimeConfig));
 
+    runtimeConfig = await resolveWebEntry(runtimeConfig);
     const bridge = getBridgeConfig();
     if (mainWindow) {
       await loadWorkspaceWindow(mainWindow, runtimeConfig);
@@ -173,7 +204,7 @@ if (!gotLock) {
 
   app.whenReady().then(async () => {
     registerIpcHandlers();
-    runtimeConfig = loadDesktopConfig();
+    runtimeConfig = await resolveWebEntry(loadDesktopConfig());
     refreshMcpPaths(runtimeConfig);
     await startMcpBridge(runtimeConfig);
     await startSidecar(runtimeConfig);
@@ -197,5 +228,6 @@ if (!gotLock) {
     void apiSidecar.stop();
     void mcpBridgeServer.stop();
     void mcpHostManager.stopAll();
+    void webStaticServer.stop();
   });
 }

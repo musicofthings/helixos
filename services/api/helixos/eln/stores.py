@@ -10,6 +10,7 @@ from helixos.eln.schemas import (
     Experiment,
     ExperimentVersion,
     Project,
+    Protocol,
     Sample,
     Workspace,
     WorkspaceInvite,
@@ -74,6 +75,15 @@ class ElnStore(Protocol):
     def delete_project(self, project_id: str) -> None:
         """Delete a project and every experiment (and below) inside it."""
         ...
+
+    # Protocols
+    def create_protocol(self, protocol: Protocol) -> Protocol: ...
+    def get_protocol(self, protocol_id: str) -> Protocol | None: ...
+    def list_protocols(
+        self, organization_ids: Sequence[str], workspace_id: str | None = None
+    ) -> list[Protocol]: ...
+    def update_protocol(self, protocol: Protocol) -> Protocol: ...
+    def delete_protocol(self, protocol_id: str) -> None: ...
 
     # Experiments
     def create_experiment_with_version(
