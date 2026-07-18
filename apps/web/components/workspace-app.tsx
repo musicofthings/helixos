@@ -4,26 +4,22 @@ import {
   Activity,
   Beaker,
   CheckCircle2,
-  ClipboardList,
   Dna,
+  BookOpen,
   FlaskConical,
-  LayoutGrid,
+  Hash,
   LoaderCircle,
   Network,
   PackagePlus,
   Play,
   Plus,
   Search,
-  Share2,
   ShieldCheck,
-  TestTube2,
   ToggleLeft,
-  ToggleRight,
-  Trash2
+  ToggleRight
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
-import { FormEvent, useCallback, useMemo, useRef, useState } from "react";
-import { useQueries } from "@tanstack/react-query";
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Workspace } from "@helixos/types";
 
 import { AgentPanel } from "./agent/agent-panel";
@@ -36,7 +32,6 @@ import {
   useDeleteWorkspace,
   useExperiments,
   useOrganizations,
-  useProjects,
   useRunConnectorJob,
   useSeedDefaultWorkspaces,
   useSequence,
@@ -44,13 +39,21 @@ import {
 } from "../hooks/use-helix-api";
 import { useDesktopShell } from "../hooks/use-desktop-shell";
 import { LabView } from "./eln/lab-view";
+import { ProtocolsView } from "./eln/protocols-view";
 import { ShareWorkspaceModal } from "./eln/share-workspace-modal";
 import { WorkspaceCreateForm } from "./eln/workspace-create-form";
+import { WorkspaceHome } from "./eln/workspace-home";
 import { formatAuditEventMessage } from "../lib/audit-display";
-import { createHelixClient, getApiBaseUrl } from "../lib/api-config";
+import { getApiBaseUrl } from "../lib/api-config";
 import { categoryLabel } from "../lib/workspace-taxonomy";
 
-type View = "workspace" | "experiments" | "sequences" | "inventory" | "connectors";
+type View =
+  | "workspace-home"
+  | "experiments"
+  | "protocols"
+  | "sequences"
+  | "inventory"
+  | "connectors";
 
 type Reagent = {
   id: string;
@@ -81,9 +84,9 @@ type ActivityEvent = {
   message: string;
 };
 
-const navItems: Array<{ id: View; icon: LucideIcon; label: string }> = [
-  { id: "workspace", icon: ClipboardList, label: "Workspace" },
+const toolNavItems: Array<{ id: Exclude<View, "workspace-home">; icon: LucideIcon; label: string }> = [
   { id: "experiments", icon: FlaskConical, label: "Lab notebook" },
+  { id: "protocols", icon: BookOpen, label: "Protocols" },
   { id: "sequences", icon: Dna, label: "Sequences" },
   { id: "inventory", icon: Beaker, label: "Inventory" },
   { id: "connectors", icon: Network, label: "Connectors" }
@@ -157,7 +160,8 @@ const DEMO_SEQUENCE_ID = "seq_demo_reporter";
 
 export function WorkspaceApp({ initialDesktopShell = false }: { initialDesktopShell?: boolean }) {
   const { isDesktop, sidecarStatus, canRestartSidecar } = useDesktopShell(initialDesktopShell);
-  const apiEnabled = !isDesktop || sidecarStatus === "ready";
+  // Keep calling the API while the sidecar is starting (queries retry). Only hard-stop on failure.
+  const apiEnabled = !isDesktop || (sidecarStatus !== "error" && sidecarStatus !== "stopped");
 
   const organizationsQuery = useOrganizations(apiEnabled);
   const connectorsQuery = useConnectors(apiEnabled);
@@ -167,10 +171,6 @@ export function WorkspaceApp({ initialDesktopShell = false }: { initialDesktopSh
 
   const experimentsQuery = useExperiments(primaryOrganizationId, apiEnabled);
   const workspacesQuery = useWorkspaces(primaryOrganizationId, apiEnabled);
-  const orgProjectsQuery = useProjects(
-    { organizationId: primaryOrganizationId, scope: "org" },
-    apiEnabled
-  );
   const createWorkspace = useCreateWorkspace(primaryOrganizationId);
   const deleteWorkspace = useDeleteWorkspace(primaryOrganizationId);
   const seedWorkspaces = useSeedDefaultWorkspaces(primaryOrganizationId);
@@ -183,12 +183,10 @@ export function WorkspaceApp({ initialDesktopShell = false }: { initialDesktopSh
 
   const experiments = useMemo(() => experimentsQuery.data ?? [], [experimentsQuery.data]);
   const workspaces = useMemo(() => workspacesQuery.data ?? [], [workspacesQuery.data]);
-  const orgProjects = useMemo(() => orgProjectsQuery.data ?? [], [orgProjectsQuery.data]);
-  const [activeView, setActiveView] = useState<View>("experiments");
+  const [activeView, setActiveView] = useState<View>("workspace-home");
+  const [activeWorkspaceId, setActiveWorkspaceId] = useState<string | undefined>();
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const [selectedExperimentId, setSelectedExperimentId] = useState<string | undefined>();
-  const [resumeWorkspaceId, setResumeWorkspaceId] = useState<string | undefined>();
-  const [resumeNonce, setResumeNonce] = useState(0);
   const [showWorkspaceCreate, setShowWorkspaceCreate] = useState(false);
   const [shareWorkspace, setShareWorkspace] = useState<Workspace | null>(null);
   const [deleteWorkspaceTarget, setDeleteWorkspaceTarget] = useState<Workspace | null>(null);
@@ -202,18 +200,6 @@ export function WorkspaceApp({ initialDesktopShell = false }: { initialDesktopSh
   ]);
   const activityCounter = useRef(0);
 
-  // Experiment selection is owned by the Lab workbench (LabView).
-  const displayExperiments = experiments;
-
-  const sampleCountQueries = useQueries({
-    queries: experiments.slice(0, 20).map((experiment) => ({
-      queryKey: ["samples", experiment.id],
-      enabled: apiEnabled && Boolean(experiment.id),
-      queryFn: () => createHelixClient().listSamples(experiment.id)
-    }))
-  });
-  const sampleCount = sampleCountQueries.reduce((total, query) => total + (query.data?.length ?? 0), 0);
-
   const connectorRegistry = useMemo(() => connectorsQuery.data ?? [], [connectorsQuery.data]);
   const connectorTransportById = useMemo(
     () => new Map(connectorRegistry.map((connector) => [connector.id, connector.transport])),
@@ -221,17 +207,25 @@ export function WorkspaceApp({ initialDesktopShell = false }: { initialDesktopSh
   );
 
   const selectedExperiment =
-    displayExperiments.find((experiment) => experiment.id === selectedExperimentId) ??
-    displayExperiments[0] ??
+    experiments.find((experiment) => experiment.id === selectedExperimentId) ??
+    experiments[0] ??
     null;
 
-  const recentExperiments = useMemo(
-    () =>
-      [...experiments]
-        .sort((a, b) => new Date(b.raw.updated_at).getTime() - new Date(a.raw.updated_at).getTime())
-        .slice(0, 5),
-    [experiments]
-  );
+  const activeWorkspace =
+    workspaces.find((workspace) => workspace.id === activeWorkspaceId) ?? null;
+
+  useEffect(() => {
+    if (workspaces.length === 0) {
+      if (activeWorkspaceId !== undefined) {
+        setActiveWorkspaceId(undefined);
+      }
+      return;
+    }
+    const stillThere = workspaces.some((workspace) => workspace.id === activeWorkspaceId);
+    if (!stillThere) {
+      setActiveWorkspaceId(workspaces[0]?.id);
+    }
+  }, [workspaces, activeWorkspaceId]);
 
   const connectors: ConnectorState[] = useMemo(() => {
     return connectorRegistry.map((connector) => {
@@ -285,27 +279,19 @@ export function WorkspaceApp({ initialDesktopShell = false }: { initialDesktopSh
     setActivity((items) => [{ id, message: `${todayStamp()} - ${message}` }, ...items].slice(0, 8));
   }
 
-  function openLabNotebook(experimentId?: string, workspaceId?: string) {
+  function selectWorkspace(workspaceId: string) {
+    setActiveWorkspaceId(workspaceId);
+    setShowWorkspaceCreate(false);
+    setActiveView("workspace-home");
+  }
+
+  function openLabNotebook(experimentId?: string) {
     if (experimentId) {
       setSelectedExperimentId(experimentId);
     }
-    if (workspaceId) {
-      setResumeWorkspaceId(workspaceId);
-      setResumeNonce((nonce) => nonce + 1);
-    }
+    setShowWorkspaceCreate(false);
     setActiveView("experiments");
   }
-
-  function resumeWorkspace(workspaceId: string) {
-    setResumeWorkspaceId(workspaceId);
-    setResumeNonce((nonce) => nonce + 1);
-    setActiveView("experiments");
-    log("Resumed workspace in lab notebook");
-  }
-
-  const clearResumeWorkspace = useCallback(() => {
-    setResumeWorkspaceId(undefined);
-  }, []);
 
   function confirmDeleteWorkspace() {
     if (!deleteWorkspaceTarget) return;
@@ -314,8 +300,9 @@ export function WorkspaceApp({ initialDesktopShell = false }: { initialDesktopSh
       onSuccess: () => {
         log(`Deleted workspace ${target.name}`);
         setDeleteWorkspaceTarget(null);
-        if (resumeWorkspaceId === target.id) {
-          setResumeWorkspaceId(undefined);
+        if (activeWorkspaceId === target.id) {
+          setActiveWorkspaceId(undefined);
+          setActiveView("workspace-home");
         }
       },
       onError: (error) =>
@@ -433,23 +420,42 @@ export function WorkspaceApp({ initialDesktopShell = false }: { initialDesktopSh
   );
 
   const runAgentQuickPrompt = useCallback(() => {
-    setActiveView("workspace");
+    setActiveView("workspace-home");
     log("Open the lab agent panel to run a quick prompt");
   }, []);
 
   const commandItems = useMemo<CommandPaletteItem[]>(
     () => [
-      { id: "nav-workspace", label: "Go to workspace", group: "Navigate", run: () => setActiveView("workspace") },
+      {
+        id: "nav-workspace-home",
+        label: "Go to workspace home",
+        group: "Navigate",
+        run: () => setActiveView("workspace-home")
+      },
       { id: "nav-experiments", label: "Go to lab notebook", group: "Navigate", run: () => setActiveView("experiments") },
+      { id: "nav-protocols", label: "Go to protocols", group: "Navigate", run: () => setActiveView("protocols") },
       { id: "nav-sequences", label: "Go to sequences", group: "Navigate", run: () => setActiveView("sequences") },
       { id: "nav-inventory", label: "Go to inventory", group: "Navigate", run: () => setActiveView("inventory") },
       { id: "nav-connectors", label: "Go to connectors", group: "Navigate", run: () => setActiveView("connectors") },
+      {
+        id: "create-workspace",
+        label: "Create workspace",
+        group: "Lab",
+        keywords: ["channel", "eln"],
+        run: () => {
+          setShowWorkspaceCreate(true);
+          setActiveView("workspace-home");
+        }
+      },
       {
         id: "create-experiment",
         label: "Create new experiment",
         group: "Lab",
         keywords: ["draft", "eln"],
-        run: () => setActiveView("experiments")
+        run: () => {
+          setActiveView("experiments");
+          setNewExperimentNonce((nonce) => nonce + 1);
+        }
       },
       {
         id: "analyze-sequence",
@@ -501,11 +507,88 @@ export function WorkspaceApp({ initialDesktopShell = false }: { initialDesktopSh
           <div className="text-xl font-semibold text-ink">HelixOS</div>
           <div className="mt-1 text-sm text-graphite">Laboratory operating system</div>
 
-          <nav className="mt-8 grid gap-1 text-sm">
-            {navItems.map(({ id, icon: Icon, label }) => (
+          <section className="mt-8">
+            <div className="mb-2 flex items-center justify-between gap-2 px-1">
+              <h2 className="text-[11px] font-semibold uppercase tracking-wide text-graphite">
+                Workspaces
+              </h2>
               <button
+                type="button"
+                onClick={() => {
+                  setShowWorkspaceCreate((open) => !open);
+                  setActiveView("workspace-home");
+                }}
+                aria-label="Create workspace"
+                title="Create workspace"
+                className="rounded-md border border-black/10 p-1 text-graphite hover:bg-black/5"
+              >
+                <Plus size={14} />
+              </button>
+            </div>
+            <nav className="grid gap-0.5 text-sm">
+              {workspacesQuery.isLoading ? (
+                <p className="inline-flex items-center gap-2 px-3 py-2 text-xs text-graphite">
+                  <LoaderCircle size={14} className="animate-spin" /> Loading…
+                </p>
+              ) : workspaces.length === 0 ? (
+                <div className="grid gap-2 px-1">
+                  <p className="px-2 text-xs text-graphite">No workspaces yet.</p>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      primaryOrganizationId && seedWorkspaces.mutate(primaryOrganizationId)
+                    }
+                    disabled={!primaryOrganizationId || seedWorkspaces.isPending}
+                    className="inline-flex items-center justify-center gap-2 rounded-md border border-black/10 px-3 py-2 text-xs font-medium hover:bg-black/5 disabled:cursor-not-allowed"
+                  >
+                    {seedWorkspaces.isPending ? (
+                      <LoaderCircle size={14} className="animate-spin" />
+                    ) : null}
+                    Seed defaults
+                  </button>
+                </div>
+              ) : (
+                workspaces.map((workspace) => {
+                  const channelActive = workspace.id === activeWorkspaceId && !showWorkspaceCreate;
+                  return (
+                    <button
+                      type="button"
+                      key={workspace.id}
+                      onClick={() => selectWorkspace(workspace.id)}
+                      className={`flex items-center gap-2 rounded-md px-3 py-2 text-left transition ${
+                        channelActive
+                          ? "bg-white text-fern shadow-sm"
+                          : "text-ink hover:bg-black/5"
+                      }`}
+                    >
+                      <Hash size={14} className={channelActive ? "text-fern" : "text-graphite"} />
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate font-medium">{workspace.name}</span>
+                        <span className="block truncate text-[11px] text-graphite">
+                          {workspace.subcategory
+                            ? `${categoryLabel(workspace.category)} · ${workspace.subcategory}`
+                            : categoryLabel(workspace.category)}
+                        </span>
+                      </span>
+                    </button>
+                  );
+                })
+              )}
+            </nav>
+          </section>
+
+          <nav className="mt-8 grid gap-1 text-sm">
+            <div className="mb-1 px-1 text-[11px] font-semibold uppercase tracking-wide text-graphite">
+              Tools
+            </div>
+            {toolNavItems.map(({ id, icon: Icon, label }) => (
+              <button
+                type="button"
                 key={id}
-                onClick={() => setActiveView(id)}
+                onClick={() => {
+                  setShowWorkspaceCreate(false);
+                  setActiveView(id);
+                }}
                 className={`flex items-center gap-2 rounded-md px-3 py-2 text-left transition ${
                   activeView === id ? "bg-white text-fern shadow-sm" : "text-ink hover:bg-black/5"
                 }`}
@@ -534,9 +617,15 @@ export function WorkspaceApp({ initialDesktopShell = false }: { initialDesktopSh
         <section className="px-5 py-6 lg:px-8">
           <header className="flex flex-wrap items-start justify-between gap-4">
             <div>
-              <h1 className="text-2xl font-semibold tracking-normal text-ink">AI-native molecular biology workspace</h1>
+              <h1 className="text-2xl font-semibold tracking-normal text-ink">
+                {activeWorkspace ? activeWorkspace.name : "HelixOS workspace"}
+              </h1>
               <p className="mt-2 max-w-3xl text-sm leading-6 text-graphite">
-                Create records, analyze sequences, mutate inventory, run connector jobs, and move diagnostic workflow state from one working surface.
+                {activeWorkspace
+                  ? activeWorkspace.subcategory
+                    ? `${categoryLabel(activeWorkspace.category)} · ${activeWorkspace.subcategory}`
+                    : categoryLabel(activeWorkspace.category)
+                  : "Create or select a workspace in the sidebar to get started."}
               </p>
               {apiStatusMessage ? (
                 <p className="mt-2 rounded-md border border-signal/30 bg-[#eef6f7] px-3 py-2 text-xs text-signal">{apiStatusMessage}</p>
@@ -591,260 +680,178 @@ export function WorkspaceApp({ initialDesktopShell = false }: { initialDesktopSh
             </div>
           </header>
 
-          {activeView === "workspace" && (
-            <div className="mt-6 grid gap-4">
-              <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-                <Metric icon={LayoutGrid} label="Workspaces" value={String(workspaces.length)} />
-                <Metric icon={ClipboardList} label="Projects" value={String(orgProjects.length)} />
-                <Metric icon={FlaskConical} label="Experiments" value={String(experiments.length)} />
-                <Metric icon={TestTube2} label="Samples" value={String(sampleCount)} />
-              </div>
-
-              <div className="flex flex-wrap gap-2">
-                <button
-                  onClick={() => setShowWorkspaceCreate((open) => !open)}
-                  className="inline-flex items-center gap-2 rounded-md bg-fern px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-[#1d513c]"
-                >
-                  <Plus size={16} />
-                  Create workspace
-                </button>
-                <button
-                  onClick={() => openLabNotebook()}
-                  className="inline-flex items-center gap-2 rounded-md border border-black/10 px-4 py-2 text-sm font-medium hover:bg-black/5"
-                >
-                  <FlaskConical size={16} />
-                  Open lab notebook
-                </button>
-                <button
-                  onClick={() => {
-                    setActiveView("experiments");
-                    setNewExperimentNonce((nonce) => nonce + 1);
-                  }}
-                  className="inline-flex items-center gap-2 rounded-md border border-black/10 px-4 py-2 text-sm font-medium hover:bg-black/5"
-                >
-                  <Plus size={16} />
-                  New experiment
-                </button>
-              </div>
-
+          {activeView === "workspace-home" && (
+            <div className="grid gap-4">
               {showWorkspaceCreate ? (
-                <WorkspaceCreateForm
-                  pending={createWorkspace.isPending}
-                  onCancel={() => setShowWorkspaceCreate(false)}
-                  onSubmit={(values) => {
-                    if (!primaryOrganizationId) return;
-                    createWorkspace.mutate(
-                      {
-                        organizationId: primaryOrganizationId,
-                        name: values.name,
-                        category: values.category,
-                        subcategory: values.subcategory
-                      },
-                      {
-                        onSuccess: (workspace) => {
-                          log(`Created workspace ${workspace.name}`);
-                          setShowWorkspaceCreate(false);
-                          resumeWorkspace(workspace.id);
-                        },
-                        onError: (error) =>
-                          log(error instanceof Error ? error.message : "Failed to create workspace")
+                <div className="mt-6">
+                  <h2 className="mb-3 text-sm font-semibold text-ink">Create workspace</h2>
+                  <WorkspaceCreateForm
+                    pending={createWorkspace.isPending}
+                    onCancel={() => setShowWorkspaceCreate(false)}
+                    onSubmit={(values) => {
+                      if (!primaryOrganizationId) {
+                        log(
+                          apiStatusMessage ??
+                            "Organization not loaded yet. Wait for API sync, then try again."
+                        );
+                        return;
                       }
-                    );
-                  }}
-                />
-              ) : null}
-
-              <div className="grid gap-4 xl:grid-cols-[1.2fr_0.8fr]">
-                <div className="grid gap-4">
-                  <section className="rounded-md border border-black/10 bg-white p-4 shadow-sm">
-                    <div className="mb-3 flex items-center justify-between gap-3">
-                      <h2 className="text-sm font-semibold text-ink">Workspaces</h2>
-                      <button
-                        onClick={() => openLabNotebook()}
-                        className="text-xs font-medium text-fern hover:underline"
-                      >
-                        Open lab
-                      </button>
-                    </div>
-                    {workspacesQuery.isLoading ? (
-                      <p className="inline-flex items-center gap-2 text-xs text-graphite">
-                        <LoaderCircle size={14} className="animate-spin" /> Loading workspaces…
-                      </p>
-                    ) : workspaces.length === 0 ? (
-                      <div className="grid gap-2">
-                        <p className="text-sm text-graphite">
-                          No workspaces yet. Create one above or seed the defaults.
-                        </p>
-                        <button
-                          onClick={() =>
-                            primaryOrganizationId && seedWorkspaces.mutate(primaryOrganizationId)
-                          }
-                          disabled={!primaryOrganizationId || seedWorkspaces.isPending}
-                          className="inline-flex w-fit items-center gap-2 rounded-md border border-black/10 px-3 py-2 text-xs font-medium hover:bg-black/5 disabled:cursor-not-allowed"
-                        >
-                          {seedWorkspaces.isPending ? (
-                            <LoaderCircle size={14} className="animate-spin" />
-                          ) : (
-                            <LayoutGrid size={14} />
-                          )}
-                          Seed default workspaces
-                        </button>
-                      </div>
-                    ) : (
-                      <div className="grid gap-2">
-                        {workspaces.map((workspace) => (
-                          <div
-                            key={workspace.id}
-                            className="rounded-md border border-black/10 px-3 py-2"
-                          >
-                            <div className="flex flex-wrap items-start justify-between gap-2">
-                              <div>
-                                <div className="text-sm font-medium text-ink">{workspace.name}</div>
-                                <div className="mt-0.5 text-[11px] text-graphite">
-                                  {workspace.subcategory
-                                    ? `${categoryLabel(workspace.category)} · ${workspace.subcategory}`
-                                    : categoryLabel(workspace.category)}
-                                </div>
-                              </div>
-                              <div className="flex flex-wrap gap-1">
-                                <button
-                                  type="button"
-                                  onClick={() => resumeWorkspace(workspace.id)}
-                                  className="rounded-md border border-black/10 px-2 py-1 text-[11px] font-medium hover:bg-black/5"
-                                >
-                                  Resume
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => setShareWorkspace(workspace)}
-                                  className="inline-flex items-center gap-1 rounded-md border border-black/10 px-2 py-1 text-[11px] font-medium hover:bg-black/5"
-                                >
-                                  <Share2 size={12} />
-                                  Share
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => setDeleteWorkspaceTarget(workspace)}
-                                  className="inline-flex items-center gap-1 rounded-md border border-black/10 px-2 py-1 text-[11px] font-medium text-red-700 hover:bg-red-50"
-                                >
-                                  <Trash2 size={12} />
-                                  Delete
-                                </button>
-                              </div>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </section>
-
-                  <section className="rounded-md border border-black/10 bg-white p-4 shadow-sm">
-                    <h2 className="mb-3 text-sm font-semibold text-ink">Recent experiments</h2>
-                    {recentExperiments.length === 0 ? (
-                      <p className="text-sm text-graphite">No experiments yet. Create one from the lab notebook.</p>
-                    ) : (
-                      <div className="grid gap-2">
-                        {recentExperiments.map((experiment) => (
-                          <button
-                            key={experiment.id}
-                            onClick={() => openLabNotebook(experiment.id)}
-                            className="rounded-md border border-black/10 px-3 py-2 text-left hover:bg-black/5"
-                          >
-                            <div className="text-sm font-medium text-ink">{experiment.title}</div>
-                            <div className="mt-0.5 text-[11px] text-graphite">
-                              v{experiment.versionCount} · {experiment.updated}
-                            </div>
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                  </section>
+                      createWorkspace.mutate(
+                        {
+                          organizationId: primaryOrganizationId,
+                          name: values.name,
+                          category: values.category,
+                          subcategory: values.subcategory
+                        },
+                        {
+                          onSuccess: (workspace) => {
+                            log(`Created workspace ${workspace.name}`);
+                            setShowWorkspaceCreate(false);
+                            selectWorkspace(workspace.id);
+                          },
+                          onError: (error) =>
+                            log(
+                              error instanceof Error ? error.message : "Failed to create workspace"
+                            )
+                        }
+                      );
+                    }}
+                  />
                 </div>
-
-                <AgentPanel
-                  organizationId={primaryOrganizationId}
-                  sessionId={agentSession.sessionId}
-                  sessionError={agentSession.error}
-                  sessionPending={agentSession.isPending}
-                  onRetrySession={agentSession.retry}
-                  context={{
-                    experiment_id: selectedExperiment?.id,
-                    experiment_title: selectedExperiment?.title,
-                    sequence_length: sequenceStats.length
-                  }}
-                  onActivity={log}
-                />
-              </div>
-
-              {shareWorkspace ? (
-                <ShareWorkspaceModal
-                  workspace={shareWorkspace}
-                  organizationId={primaryOrganizationId}
-                  onClose={() => setShareWorkspace(null)}
-                  onActivity={log}
-                />
-              ) : null}
-
-              {deleteWorkspaceTarget ? (
-                <div
-                  className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
-                  onMouseDown={(event) => {
-                    if (event.target === event.currentTarget) setDeleteWorkspaceTarget(null);
-                  }}
-                  onKeyDown={(event) => {
-                    if (event.key === "Escape") setDeleteWorkspaceTarget(null);
-                  }}
-                >
-                  <div
-                    role="dialog"
-                    aria-modal="true"
-                    aria-labelledby="delete-workspace-title"
-                    className="w-full max-w-md rounded-md border border-black/10 bg-white p-4 shadow-lg"
-                  >
-                    <h2 id="delete-workspace-title" className="text-sm font-semibold text-ink">
-                      Delete workspace?
-                    </h2>
-                    <p className="mt-2 text-sm text-graphite">
-                      This permanently deletes{" "}
-                      <span className="font-medium text-ink">{deleteWorkspaceTarget.name}</span> and
-                      every project, experiment, sample, and dataset under it.
-                    </p>
-                    <div className="mt-4 flex flex-wrap justify-end gap-2">
-                      <button
-                        type="button"
-                        onClick={() => setDeleteWorkspaceTarget(null)}
-                        className="rounded-md border border-black/10 px-3 py-1.5 text-xs font-medium hover:bg-black/5"
-                      >
-                        Cancel
-                      </button>
-                      <button
-                        type="button"
-                        onClick={confirmDeleteWorkspace}
-                        disabled={deleteWorkspace.isPending}
-                        className="rounded-md bg-red-700 px-3 py-1.5 text-xs font-medium text-white hover:bg-red-800 disabled:cursor-not-allowed disabled:opacity-60"
-                      >
-                        {deleteWorkspace.isPending ? "Deleting…" : "Delete workspace"}
-                      </button>
-                    </div>
+              ) : activeWorkspace ? (
+                <div className="mt-6 grid gap-4 xl:grid-cols-[1.2fr_0.8fr] xl:items-start">
+                  <WorkspaceHome
+                    workspace={activeWorkspace}
+                    organizationId={primaryOrganizationId}
+                    apiEnabled={apiEnabled}
+                    onOpenLab={openLabNotebook}
+                    onShare={() => setShareWorkspace(activeWorkspace)}
+                    onDelete={() => setDeleteWorkspaceTarget(activeWorkspace)}
+                    onActivity={log}
+                  />
+                  <AgentPanel
+                    organizationId={primaryOrganizationId}
+                    sessionId={agentSession.sessionId}
+                    sessionError={agentSession.error}
+                    sessionPending={agentSession.isPending}
+                    onRetrySession={agentSession.retry}
+                    context={{
+                      experiment_id: selectedExperiment?.id,
+                      experiment_title: selectedExperiment?.title,
+                      sequence_length: sequenceStats.length
+                    }}
+                    onActivity={log}
+                  />
+                </div>
+              ) : (
+                <section className="mt-6 rounded-md border border-dashed border-black/15 bg-white p-8 text-center shadow-sm">
+                  <h2 className="text-sm font-semibold text-ink">No workspace selected</h2>
+                  <p className="mx-auto mt-2 max-w-md text-sm text-graphite">
+                    Create a workspace with the + control in the sidebar, or seed the defaults to
+                    start with Molecular Biology, Biochemistry, and Microbiology.
+                  </p>
+                  <div className="mt-4 flex flex-wrap justify-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setShowWorkspaceCreate(true)}
+                      className="inline-flex items-center gap-2 rounded-md bg-fern px-3 py-2 text-xs font-medium text-white hover:bg-[#1d513c]"
+                    >
+                      <Plus size={14} />
+                      Create workspace
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        primaryOrganizationId && seedWorkspaces.mutate(primaryOrganizationId)
+                      }
+                      disabled={!primaryOrganizationId || seedWorkspaces.isPending}
+                      className="inline-flex items-center gap-2 rounded-md border border-black/10 px-3 py-2 text-xs font-medium hover:bg-black/5 disabled:cursor-not-allowed"
+                    >
+                      {seedWorkspaces.isPending ? (
+                        <LoaderCircle size={14} className="animate-spin" />
+                      ) : null}
+                      Seed defaults
+                    </button>
                   </div>
-                </div>
-              ) : null}
+                </section>
+              )}
             </div>
           )}
 
           {activeView === "experiments" && (
             <LabView
               organizationId={primaryOrganizationId}
+              workspace={activeWorkspace}
               apiEnabled={apiEnabled}
               selectedExperimentId={selectedExperimentId}
               onSelectExperiment={setSelectedExperimentId}
               onActivity={log}
               newExperimentNonce={newExperimentNonce}
-              resumeWorkspaceId={resumeWorkspaceId}
-              resumeNonce={resumeNonce}
-              onResumeConsumed={clearResumeWorkspace}
             />
           )}
+
+          {activeView === "protocols" && (
+            <ProtocolsView
+              organizationId={primaryOrganizationId}
+              workspace={activeWorkspace}
+              apiEnabled={apiEnabled}
+              onActivity={log}
+            />
+          )}
+
+          {shareWorkspace ? (
+            <ShareWorkspaceModal
+              workspace={shareWorkspace}
+              organizationId={primaryOrganizationId}
+              onClose={() => setShareWorkspace(null)}
+              onActivity={log}
+            />
+          ) : null}
+
+          {deleteWorkspaceTarget ? (
+            <div
+              className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+              onMouseDown={(event) => {
+                if (event.target === event.currentTarget) setDeleteWorkspaceTarget(null);
+              }}
+              onKeyDown={(event) => {
+                if (event.key === "Escape") setDeleteWorkspaceTarget(null);
+              }}
+            >
+              <div
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="delete-workspace-title"
+                className="w-full max-w-md rounded-md border border-black/10 bg-white p-4 shadow-lg"
+              >
+                <h2 id="delete-workspace-title" className="text-sm font-semibold text-ink">
+                  Delete workspace?
+                </h2>
+                <p className="mt-2 text-sm text-graphite">
+                  This permanently deletes{" "}
+                  <span className="font-medium text-ink">{deleteWorkspaceTarget.name}</span> and
+                  every project, experiment, sample, and dataset under it.
+                </p>
+                <div className="mt-4 flex flex-wrap justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setDeleteWorkspaceTarget(null)}
+                    className="rounded-md border border-black/10 px-3 py-1.5 text-xs font-medium hover:bg-black/5"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={confirmDeleteWorkspace}
+                    disabled={deleteWorkspace.isPending}
+                    className="rounded-md bg-red-700 px-3 py-1.5 text-xs font-medium text-white hover:bg-red-800 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {deleteWorkspace.isPending ? "Deleting…" : "Delete workspace"}
+                  </button>
+                </div>
+              </div>
+            </div>
+          ) : null}
 
           {activeView === "sequences" && (
             <section className="mt-6 rounded-md border border-black/10 bg-white p-4 shadow-sm">

@@ -111,6 +111,35 @@ class ProjectORM(Base):
     )
 
 
+class ProtocolORM(Base):
+    """Persisted reusable protocol in a workspace library."""
+
+    __tablename__ = "eln_protocols"
+    __table_args__ = (
+        Index("ix_eln_protocols_org", "organization_id"),
+        Index("ix_eln_protocols_workspace", "workspace_id"),
+    )
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    organization_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    workspace_id: Mapped[str] = mapped_column(
+        String(64), ForeignKey("eln_workspaces.id"), nullable=False
+    )
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    status: Mapped[str] = mapped_column(String(32), nullable=False)
+    steps: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    source_provider: Mapped[str] = mapped_column(String(32), nullable=False)
+    source_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    source_external_id: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+
+
 class ExperimentORM(Base):
     """Persisted experiment container."""
 

@@ -8,6 +8,7 @@ The ELN module is the core of HelixOS — the durable, tenant-scoped, audited sy
 
 ```txt
 Workspace (category + optional subcategory)   user-defined; category chosen at creation
+  ├─ Protocol                 reusable procedure library (manual or imported stub)
   └─ Project                  user-defined program of work
        └─ Experiment          a "repo" that tracks a HEAD version — created *inside* a project
             ├─ ExperimentVersion   immutable snapshot ("commit"), git-style lineage
@@ -32,14 +33,14 @@ A workspace is created by choosing a `category`; some categories carry an option
 
 The suggested subcategory lists live in `CATEGORY_SUBCATEGORIES` (`eln/schemas.py`) and are mirrored in the web create-workspace form. They are advisory: `subcategory` is stored as a free string, and the form's "Other…" option lets labs add their own (e.g. new Programmable Bio assays) without a schema change. `genomics` and `cell_biology` are retained only so workspaces saved under the earlier taxonomy still load.
 
-### Creating, resuming, deleting, and sharing workspaces
+### Creating, switching, deleting, and sharing workspaces
 
-Workspaces are managed from the **Workspace** tab and the lab navigator:
+Workspaces are **sidebar channels** (Slack-style). Switching happens on the main left rail; create/select opens that workspace’s home surface.
 
-- **Create** — choose category → subcategory (shared taxonomy form).
-- **Resume** — one-shot select in the lab notebook (does not stick across later refetches).
-- **Delete** — confirmation dialog; cascades the full subtree (and cleans up shares/invites). Owner/org members only.
-- **Share** — collaborator grants (`viewer` \| `editor`) and invite links. Invite accept URLs are shown once at create time; list responses redact tokens. Accepting an invite creates a grant and surfaces the workspace in the actor's list even without org membership (shared-with-me).
+- **Create** — `+` in the Workspaces sidebar section (category → subcategory form). Success selects the new workspace and opens its home.
+- **Switch** — click a workspace channel in the main sidebar.
+- **Delete** — from workspace home; confirmation dialog; cascades the full subtree (and cleans up shares/invites). Owner/org members only.
+- **Share** — from workspace home: collaborator grants (`viewer` \| `editor`) and invite links. Invite accept URLs are shown once at create time; list responses redact tokens. Accepting an invite creates a grant and surfaces the workspace in the actor's list even without org membership (shared-with-me).
 
 **Access model:** org members are workspace owners. Share-only **viewers** can read the subtree; **editors** can mutate under the workspace but cannot delete the workspace or manage shares.
 
@@ -70,10 +71,14 @@ Text · Table · Protocol steps · Reagent list · Sequence · Image · Chart ·
 
 ## User Surface
 
-Two related web surfaces:
+Shell layout (Slack-style channels):
 
-- **Workspace** — org-level overview: ELN counts, Create / Resume / Share / Delete for workspaces, recent experiments, and the Agent panel. Does not host experiment editing.
-- **Lab notebook** (default landing) — the ELN workbench (`LabView`): Workspace → Project → Experiment hierarchy, versioning, 96-well plate, and sample/dataset management. Accepts `resumeWorkspaceId` from the Workspace tab.
+- **Main sidebar — Workspaces** — list of workspace channels + create. Selecting a channel opens **workspace home** for that workspace (projects, recent experiments, Share / Delete / Open lab, Agent panel).
+- **Main sidebar — Tools** — Lab notebook, Protocols, Sequences, Inventory, Connectors. Lab notebook and Protocols are scoped to the active workspace; Lab shows Project → Experiment only (no nested workspace switcher).
+- **Workspace home** — fresh options after create/select; does not host experiment editing.
+- **Lab notebook** — ELN workbench: projects/experiments for the active workspace, versioning, 96-well plate, and sample/dataset management.
+- **Protocols** — workspace protocol library: create, edit, delete, and import stubs from protocols.io / URL (remote fetch not wired yet).
+
 Lab notebook API usage via `packages/api-client`:
 
 - Create experiment → `POST /api/v1/experiments` (creates version 1)
@@ -98,6 +103,7 @@ All mutations are tenant-scoped through the [auth](auth.md) actor and recorded i
 `eln.workspace_created`, `eln.workspace_deleted`, `eln.workspaces_seeded`,
 `eln.workspace_share_granted`, `eln.workspace_share_updated`, `eln.workspace_share_revoked`,
 `eln.workspace_invite_created`, `eln.workspace_invite_revoked`, `eln.workspace_invite_accepted`,
+`eln.protocol_created`, `eln.protocol_updated`, `eln.protocol_deleted`, `eln.protocol_imported`,
 `eln.project_created`, `eln.project_updated`, `eln.project_deleted`, `eln.experiment_created`,
 `eln.experiment_deleted`, `eln.experiment_version_committed`, `eln.experiment_version_status_changed`,
 `eln.sample_created`, `eln.sample_updated`, `eln.sample_deleted`, `eln.dataset_created`. Agent runs that reference experiments emit `ai.*` audit events.

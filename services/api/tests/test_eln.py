@@ -1,5 +1,5 @@
-"""Tests for the ELN hierarchy: workspaces, projects, experiments, versions,
-samples (96-well constraints), and datasets.
+"""Tests for the ELN hierarchy: workspaces, projects, protocols, experiments,
+versions, samples (96-well constraints), and datasets.
 
 Each test is parametrized across the in-memory and SQLite-backed clients so the
 storage contract is verified for both backends.
@@ -187,6 +187,81 @@ def test_delete_project_leaves_workspace_intact(client: TestClient) -> None:
             f"/api/v1/workspaces/{workspace['id']}", headers=ORG_DEMO_HEADERS
         ).status_code
         == 200
+    )
+
+
+@pytest.mark.parametrize("client", CLIENT_FIXTURES, indirect=True)
+def test_protocol_crud_and_import_stub(client: TestClient) -> None:
+    workspace = client.post(
+        "/api/v1/workspaces",
+        headers=ORG_DEMO_HEADERS,
+        json={
+            "organization_id": "org_demo",
+            "name": "Protocol lab",
+            "category": "molecular_biology",
+        },
+    ).json()
+
+    created = client.post(
+        "/api/v1/protocols",
+        headers=ORG_DEMO_HEADERS,
+        json={
+            "organization_id": "org_demo",
+            "workspace_id": workspace["id"],
+            "name": "Gibson assembly",
+            "steps": [{"order": 1, "title": "Thaw", "body": "Thaw master mix on ice."}],
+        },
+    )
+    assert created.status_code == 201, created.text
+    protocol = created.json()
+    assert protocol["id"].startswith("prot_")
+    assert protocol["status"] == "draft"
+    assert protocol["steps"][0]["title"] == "Thaw"
+
+    listed = client.get(
+        f"/api/v1/protocols?organization_id=org_demo&workspace_id={workspace['id']}",
+        headers=ORG_DEMO_HEADERS,
+    )
+    assert listed.status_code == 200
+    assert any(item["id"] == protocol["id"] for item in listed.json())
+
+    patched = client.patch(
+        f"/api/v1/protocols/{protocol['id']}",
+        headers=ORG_DEMO_HEADERS,
+        json={"status": "active", "name": "Gibson assembly v2"},
+    )
+    assert patched.status_code == 200, patched.text
+    assert patched.json()["status"] == "active"
+    assert patched.json()["name"] == "Gibson assembly v2"
+
+    imported = client.post(
+        "/api/v1/protocols/import",
+        headers=ORG_DEMO_HEADERS,
+        json={
+            "organization_id": "org_demo",
+            "workspace_id": workspace["id"],
+            "source_provider": "protocols_io",
+            "source_url": "https://www.protocols.io/view/example",
+            "name": "Imported PCR",
+        },
+    )
+    assert imported.status_code == 201, imported.text
+    stub = imported.json()
+    assert stub["source_provider"] == "protocols_io"
+    assert stub["status"] == "draft"
+    assert stub["steps"]
+
+    assert (
+        client.delete(
+            f"/api/v1/protocols/{protocol['id']}", headers=ORG_DEMO_HEADERS
+        ).status_code
+        == 204
+    )
+    assert (
+        client.get(
+            f"/api/v1/protocols/{protocol['id']}", headers=ORG_DEMO_HEADERS
+        ).status_code
+        == 404
     )
 
 

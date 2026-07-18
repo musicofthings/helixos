@@ -82,7 +82,7 @@ export function getApiToken(): string {
   return process.env.NEXT_PUBLIC_API_TOKEN ?? DEFAULT_TOKEN;
 }
 
-export function getSidecarStatus(): string | undefined {
+export function getSidecarStatus(): "starting" | "ready" | "error" | "stopped" | undefined {
   if (typeof window === "undefined") {
     return undefined;
   }

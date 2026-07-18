@@ -2,23 +2,15 @@ import { contextBridge, ipcRenderer } from "electron";
 
 import {
   HELIX_IPC_CHANNELS,
+  HELIX_SIDECAR_STATUS_EVENT,
   type HelixDesktopBridge,
   type SidecarStatusEvent
 } from "../shared/desktop-bridge";
 
 let bridgeConfig: HelixDesktopBridge | null = null;
+const statusListeners = new Set<(event: SidecarStatusEvent) => void>();
 
-async function loadBridgeConfig(): Promise<HelixDesktopBridge> {
-  if (bridgeConfig) {
-    return bridgeConfig;
-  }
-
-  const config = await ipcRenderer.invoke(HELIX_IPC_CHANNELS.getConfig);
-  bridgeConfig = config;
-  return config;
-}
-
-const bridge: HelixDesktopBridge = {
+const bridgeState: HelixDesktopBridge = {
   apiBaseUrl: "http://127.0.0.1:8765",
   apiToken: "org-demo-token",
   webBaseUrl: "http://127.0.0.1:3000",
@@ -28,19 +20,103 @@ const bridge: HelixDesktopBridge = {
   isDesktop: true
 };
 
-void loadBridgeConfig().then((config) => {
-  Object.assign(bridge, config);
-});
+function notifySidecarStatus(event: SidecarStatusEvent): void {
+  bridgeState.sidecarStatus = event.status;
+  if (event.apiBaseUrl) {
+    bridgeState.apiBaseUrl = event.apiBaseUrl;
+  }
+
+  for (const listener of statusListeners) {
+    try {
+      listener(event);
+    } catch (error) {
+      console.error("helixDesktop onSidecarStatus listener failed", error);
+    }
+  }
+
+  // Also emit a DOM event so non-preload subscribers can react without holding a callback.
+  try {
+    window.dispatchEvent(new CustomEvent(HELIX_SIDECAR_STATUS_EVENT, { detail: event }));
+  } catch {
+    // Ignore if the page window is not yet available.
+  }
+}
+
+async function loadBridgeConfig(): Promise<HelixDesktopBridge> {
+  if (bridgeConfig) {
+    return bridgeConfig;
+  }
+
+  const config = (await ipcRenderer.invoke(HELIX_IPC_CHANNELS.getConfig)) as HelixDesktopBridge;
+  bridgeConfig = config;
+  Object.assign(bridgeState, config);
+  notifySidecarStatus({
+    status: config.sidecarStatus,
+    apiBaseUrl: config.apiBaseUrl
+  });
+  return config;
+}
+
+void loadBridgeConfig();
 
 ipcRenderer.on(HELIX_IPC_CHANNELS.sidecarStatus, (_event, payload: SidecarStatusEvent) => {
-  bridge.sidecarStatus = payload.status;
   if (payload.apiBaseUrl) {
-    bridge.apiBaseUrl = payload.apiBaseUrl;
+    bridgeConfig = bridgeConfig
+      ? { ...bridgeConfig, apiBaseUrl: payload.apiBaseUrl, sidecarStatus: payload.status }
+      : null;
+  } else if (bridgeConfig) {
+    bridgeConfig = { ...bridgeConfig, sidecarStatus: payload.status };
+  }
+  notifySidecarStatus(payload);
+});
+
+// Expose getters so renderer reads stay live under contextBridge cloning.
+contextBridge.exposeInMainWorld("helixDesktop", {
+  get apiBaseUrl() {
+    return bridgeState.apiBaseUrl;
+  },
+  get apiToken() {
+    return bridgeState.apiToken;
+  },
+  get webBaseUrl() {
+    return bridgeState.webBaseUrl;
+  },
+  get mcpBridgeUrl() {
+    return bridgeState.mcpBridgeUrl;
+  },
+  get platform() {
+    return bridgeState.platform;
+  },
+  get sidecarStatus() {
+    return bridgeState.sidecarStatus;
+  },
+  get isDesktop() {
+    return true as const;
   }
 });
 
-contextBridge.exposeInMainWorld("helixDesktop", bridge);
-
 contextBridge.exposeInMainWorld("helixDesktopActions", {
-  restartSidecar: () => ipcRenderer.invoke(HELIX_IPC_CHANNELS.restartSidecar)
+  restartSidecar: async () => {
+    const config = (await ipcRenderer.invoke(
+      HELIX_IPC_CHANNELS.restartSidecar
+    )) as HelixDesktopBridge;
+    bridgeConfig = config;
+    Object.assign(bridgeState, config);
+    notifySidecarStatus({
+      status: config.sidecarStatus,
+      apiBaseUrl: config.apiBaseUrl
+    });
+    return config;
+  },
+  onSidecarStatus: (listener: (event: SidecarStatusEvent) => void) => {
+    statusListeners.add(listener);
+    // Immediately sync current status so late subscribers catch up.
+    listener({
+      status: bridgeState.sidecarStatus,
+      apiBaseUrl: bridgeState.apiBaseUrl
+    });
+    return () => {
+      statusListeners.delete(listener);
+    };
+  }
 });

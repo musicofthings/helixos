@@ -29,6 +29,13 @@ from helixos.eln.schemas import (
     Project,
     ProjectCreate,
     ProjectUpdate,
+    Protocol,
+    ProtocolCreate,
+    ProtocolImportRequest,
+    ProtocolSourceProvider,
+    ProtocolStatus,
+    ProtocolStep,
+    ProtocolUpdate,
     Sample,
     SampleCreate,
     SampleUpdate,
@@ -498,6 +505,195 @@ class ElnService:
             resource_id=project_id,
             payload={"name": project.name, "workspace_id": project.workspace_id},
         )
+
+    # ----------------------------------------------------------------- #
+    # Protocols
+    # ----------------------------------------------------------------- #
+    def create_protocol(self, payload: ProtocolCreate, actor: Actor) -> Protocol:
+        workspace = self.require_workspace_role(
+            payload.workspace_id, actor, WorkspaceShareRole.EDITOR
+        )
+        if workspace.organization_id != payload.organization_id:
+            raise _not_found("workspace", payload.workspace_id)
+        protocol = Protocol(**payload.model_dump())
+        self._store.create_protocol(protocol)
+        audit_service.record(
+            organization_id=protocol.organization_id,
+            actor=actor,
+            event_type="eln.protocol_created",
+            resource_type="protocol",
+            resource_id=protocol.id,
+            payload={"name": protocol.name, "workspace_id": protocol.workspace_id},
+        )
+        return protocol
+
+    def list_protocols(
+        self,
+        actor: Actor,
+        organization_id: str | None = None,
+        workspace_id: str | None = None,
+    ) -> list[Protocol]:
+        if workspace_id is not None:
+            workspace = self.require_workspace_role(
+                workspace_id, actor, WorkspaceShareRole.VIEWER
+            )
+            return self._store.list_protocols(
+                [workspace.organization_id], workspace_id=workspace_id
+            )
+
+        by_id: dict[str, Protocol] = {}
+        if organization_id is not None:
+            if organization_id in actor.organization_ids:
+                for protocol in self._store.list_protocols([organization_id]):
+                    by_id[protocol.id] = protocol
+            for share in self._store.list_shares_for_subject(actor.subject):
+                workspace = self._store.get_workspace(share.workspace_id)
+                if workspace is None or workspace.organization_id != organization_id:
+                    continue
+                for protocol in self._store.list_protocols(
+                    [organization_id], workspace_id=workspace.id
+                ):
+                    by_id[protocol.id] = protocol
+            if not by_id and organization_id not in actor.organization_ids:
+                organization_service.require_access(actor, organization_id)
+        else:
+            if actor.organization_ids:
+                for protocol in self._store.list_protocols(actor.organization_ids):
+                    by_id[protocol.id] = protocol
+            for share in self._store.list_shares_for_subject(actor.subject):
+                workspace = self._store.get_workspace(share.workspace_id)
+                if workspace is None or workspace.organization_id in actor.organization_ids:
+                    continue
+                for protocol in self._store.list_protocols(
+                    [workspace.organization_id], workspace_id=workspace.id
+                ):
+                    by_id[protocol.id] = protocol
+        return sorted(by_id.values(), key=lambda item: item.created_at)
+
+    def get_protocol(self, protocol_id: str, actor: Actor) -> Protocol:
+        protocol = self._store.get_protocol(protocol_id)
+        if protocol is None:
+            raise _not_found("protocol", protocol_id)
+        self.require_workspace_role(
+            protocol.workspace_id, actor, WorkspaceShareRole.VIEWER
+        )
+        return protocol
+
+    def update_protocol(
+        self, protocol_id: str, payload: ProtocolUpdate, actor: Actor
+    ) -> Protocol:
+        protocol = self._store.get_protocol(protocol_id)
+        if protocol is None:
+            raise _not_found("protocol", protocol_id)
+        self.require_workspace_role(
+            protocol.workspace_id, actor, WorkspaceShareRole.EDITOR
+        )
+        updates = payload.model_dump(exclude_unset=True)
+        _reject_null_updates(updates, _PROTOCOL_REQUIRED_FIELDS)
+        if not updates:
+            return protocol
+        updated = protocol.model_copy(update={**updates, "updated_at": _now()})
+        self._store.update_protocol(updated)
+        audit_service.record(
+            organization_id=updated.organization_id,
+            actor=actor,
+            event_type="eln.protocol_updated",
+            resource_type="protocol",
+            resource_id=updated.id,
+            payload={"fields": sorted(updates.keys())},
+        )
+        return updated
+
+    def delete_protocol(self, protocol_id: str, actor: Actor) -> None:
+        protocol = self._store.get_protocol(protocol_id)
+        if protocol is None:
+            raise _not_found("protocol", protocol_id)
+        self.require_workspace_role(
+            protocol.workspace_id, actor, WorkspaceShareRole.EDITOR
+        )
+        self._store.delete_protocol(protocol_id)
+        audit_service.record(
+            organization_id=protocol.organization_id,
+            actor=actor,
+            event_type="eln.protocol_deleted",
+            resource_type="protocol",
+            resource_id=protocol_id,
+            payload={"name": protocol.name, "workspace_id": protocol.workspace_id},
+        )
+
+    def import_protocol(self, payload: ProtocolImportRequest, actor: Actor) -> Protocol:
+        """Create a draft protocol shell from an external source.
+
+        Full remote fetch (protocols.io API, arbitrary URL scrape) is not wired
+        yet — this persists source metadata and a placeholder step so the UI
+        import flow works end-to-end.
+        """
+        if payload.source_provider == ProtocolSourceProvider.MANUAL:
+            raise api_error(
+                status_code=400,
+                code="invalid_import_source",
+                message="Import requires protocols_io or url as source_provider.",
+            )
+        if not payload.source_url and not payload.source_external_id:
+            raise api_error(
+                status_code=400,
+                code="missing_import_locator",
+                message="Provide source_url and/or source_external_id for import.",
+            )
+
+        name = payload.name
+        if not name:
+            if payload.source_external_id:
+                name = f"Imported protocol {payload.source_external_id}"
+            elif payload.source_url:
+                name = f"Imported protocol from {payload.source_provider.value}"
+            else:
+                name = "Imported protocol"
+
+        locator = payload.source_url or payload.source_external_id or ""
+        draft = ProtocolCreate(
+            organization_id=payload.organization_id,
+            workspace_id=payload.workspace_id,
+            name=name,
+            description=(
+                f"Stub import from {payload.source_provider.value}. "
+                "Remote content fetch is not implemented yet — replace steps manually."
+            ),
+            steps=[
+                ProtocolStep(
+                    order=1,
+                    title="Imported stub",
+                    body=(
+                        f"Source: {payload.source_provider.value}\n"
+                        f"Locator: {locator}\n\n"
+                        "Replace this step after reviewing the original protocol."
+                    ),
+                )
+            ],
+            source_provider=payload.source_provider,
+            source_url=payload.source_url,
+            source_external_id=payload.source_external_id,
+        )
+        protocol = self.create_protocol(draft, actor=actor)
+        # create_protocol already audited as created; record import detail too.
+        audit_service.record(
+            organization_id=protocol.organization_id,
+            actor=actor,
+            event_type="eln.protocol_imported",
+            resource_type="protocol",
+            resource_id=protocol.id,
+            payload={
+                "source_provider": payload.source_provider.value,
+                "source_url": payload.source_url,
+                "source_external_id": payload.source_external_id,
+            },
+        )
+        # Ensure status stays draft for stubs.
+        if protocol.status != ProtocolStatus.DRAFT:
+            return self.update_protocol(
+                protocol.id, ProtocolUpdate(status=ProtocolStatus.DRAFT), actor=actor
+            )
+        return protocol
 
     # ----------------------------------------------------------------- #
     # Experiments + versions
@@ -1019,6 +1215,7 @@ class ElnService:
 # maps to non-nullable columns. model_copy() skips validation, so an explicit JSON
 # null would otherwise be written straight through into the stored record.
 _PROJECT_REQUIRED_FIELDS = frozenset({"name", "status"})
+_PROTOCOL_REQUIRED_FIELDS = frozenset({"name", "status"})
 _SAMPLE_REQUIRED_FIELDS = frozenset({"name", "sample_type", "status", "metadata"})
 
 

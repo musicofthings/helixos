@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://helixos.dev/schemas/eln/protocol.schema.json",
+  "title": "Protocol",
+  "type": "object",
+  "required": [
+    "id",
+    "organization_id",
+    "workspace_id",
+    "name",
+    "status",
+    "steps",
+    "source_provider",
+    "created_at",
+    "updated_at"
+  ],
+  "properties": {
+    "id": { "type": "string" },
+    "organization_id": { "type": "string" },
+    "workspace_id": { "type": "string" },
+    "name": { "type": "string", "minLength": 1 },
+    "description": { "type": ["string", "null"] },
+    "status": { "type": "string", "enum": ["draft", "active", "archived"] },
+    "steps": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["order", "title", "body"],
+        "properties": {
+          "order": { "type": "integer", "minimum": 1 },
+          "title": { "type": "string", "minLength": 1 },
+          "body": { "type": "string" }
+        }
+      }
+    },
+    "source_provider": {
+      "type": "string",
+      "enum": ["manual", "protocols_io", "url"]
+    },
+    "source_url": { "type": ["string", "null"] },
+    "source_external_id": { "type": ["string", "null"] },
+    "created_at": { "type": "string", "format": "date-time" },
+    "updated_at": { "type": "string", "format": "date-time" }
+  }
+}

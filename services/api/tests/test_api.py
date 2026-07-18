@@ -15,6 +15,18 @@ def test_health() -> None:
     assert response.json() == {"status": "ok"}
 
 
+def test_cors_allows_ephemeral_loopback_origins() -> None:
+    """Packaged Electron serves the UI from a random 127.0.0.1 port."""
+    client = TestClient(create_app())
+    origin = "http://127.0.0.1:51058"
+    response = client.get(
+        "/api/v1/organizations",
+        headers={**ORG_DEMO_HEADERS, "Origin": origin},
+    )
+    assert response.status_code == 200
+    assert response.headers.get("access-control-allow-origin") == origin
+
+
 def test_modules_include_phase_one() -> None:
     client = TestClient(create_app())
     response = client.get("/api/v1/modules", headers=AUTH_HEADERS)

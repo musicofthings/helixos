@@ -12,6 +12,6 @@ Lab-domain terms used across HelixOS documentation and schemas. For how modules 
 - **MCP connector**: Tool server exposing scientific capabilities to AI agents.
 - **Organization**: Tenant boundary for users, data, billing, and permissions.
 - **Plasmid**: Circular DNA molecule used in cloning and molecular biology.
-- **Protocol**: Reusable scientific procedure with steps, reagents, and parameters.
+- **Protocol**: Reusable scientific procedure with ordered steps (workspace library). May be created manually or imported as a stub from protocols.io / URL; distinct from inline `protocol_steps` experiment blocks.
 - **Sample genealogy**: Parent-child provenance between specimens, aliquots, and derivatives.
 - **Workspace**: Lab or team subdivision inside an organization.

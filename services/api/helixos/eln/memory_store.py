@@ -11,6 +11,7 @@ from helixos.eln.schemas import (
     Experiment,
     ExperimentVersion,
     Project,
+    Protocol,
     Sample,
     Workspace,
     WorkspaceInvite,
@@ -32,6 +33,7 @@ class MemoryElnStore:
         self._shares: dict[str, WorkspaceShare] = {}
         self._invites: dict[str, WorkspaceInvite] = {}
         self._projects: dict[str, Project] = {}
+        self._protocols: dict[str, Protocol] = {}
         self._experiments: dict[str, Experiment] = {}
         self._versions: dict[str, ExperimentVersion] = {}
         self._samples: dict[str, Sample] = {}
@@ -66,6 +68,10 @@ class MemoryElnStore:
             for project_id in project_ids:
                 self._delete_project_subtree(project_id)
                 self._projects.pop(project_id, None)
+            for protocol_id in [
+                p.id for p in self._protocols.values() if p.workspace_id == workspace_id
+            ]:
+                self._protocols.pop(protocol_id, None)
             for share_id in [
                 s.id for s in self._shares.values() if s.workspace_id == workspace_id
             ]:
@@ -172,6 +178,35 @@ class MemoryElnStore:
         with self._lock:
             self._delete_project_subtree(project_id)
             self._projects.pop(project_id, None)
+
+    def create_protocol(self, protocol: Protocol) -> Protocol:
+        with self._lock:
+            self._protocols[protocol.id] = protocol
+        return protocol
+
+    def get_protocol(self, protocol_id: str) -> Protocol | None:
+        return self._protocols.get(protocol_id)
+
+    def list_protocols(
+        self, organization_ids: Sequence[str], workspace_id: str | None = None
+    ) -> list[Protocol]:
+        visible = set(organization_ids)
+        items = [
+            p
+            for p in self._protocols.values()
+            if p.organization_id in visible
+            and (workspace_id is None or p.workspace_id == workspace_id)
+        ]
+        return sorted(items, key=lambda p: p.created_at)
+
+    def update_protocol(self, protocol: Protocol) -> Protocol:
+        with self._lock:
+            self._protocols[protocol.id] = protocol
+        return protocol
+
+    def delete_protocol(self, protocol_id: str) -> None:
+        with self._lock:
+            self._protocols.pop(protocol_id, None)
 
     # Experiments
     def create_experiment_with_version(

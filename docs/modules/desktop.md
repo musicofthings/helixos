@@ -126,6 +126,14 @@ The workspace exposes a Warp-style command palette with `⌘K` / `Ctrl+K` for na
 - External links open in the system browser.
 - Sidecar and MCP bridge bind to `127.0.0.1` only.
 
+## Sidecar status bridge
+
+The renderer must wait for the API sidecar before issuing authenticated requests.
+
+- Preload exposes `window.helixDesktop.sidecarStatus` and `window.helixDesktopActions.onSidecarStatus(listener)`.
+- Status changes also dispatch a `helix:sidecar-status-changed` DOM event.
+- [`useDesktopShell`](../../apps/web/hooks/use-desktop-shell.ts) starts as `starting` and only enables API queries when status is `ready`.
+
 ## Troubleshooting
 
 ### JavaScript error on launch
@@ -149,8 +157,53 @@ npm run dev:desktop
 
 Stop any browser-only dev server on port 3000 before starting the desktop stack, or run `npm run dev:desktop` which clears ports 3000/8765/8766 automatically.
 
+### Packaged app looks unstyled (no CSS)
+
+Next’s static export references absolute `/_next/static/...` assets. Loading `index.html` via `file://` cannot resolve those paths, so the UI renders as plain text. Packaged mode now serves `resources/web` from a loopback HTTP static server before the BrowserWindow loads. Rebuild/pack after pulling that change:
+
+```bash
+cd apps/desktop
+npm run pack
+open release/mac/HelixOS.app
+```
+
+### Static export / pack fails on `/`
+
+Packaged builds set `HELIX_STATIC_EXPORT=1`. The home page must not `await searchParams` — desktop detection is client-side via preload / query params. Rebuild resources with:
+
+```bash
+cd apps/desktop
+npm run prepare:resources
+npm run pack
+```
+
+Launch the local packaged app:
+
+```bash
+open apps/desktop/release/mac/HelixOS.app
+```
+
+### Next.js cross-origin warning in desktop dev
+
+Electron loads the Next dev server as `http://127.0.0.1:3000`. `apps/web/next.config.ts` sets `allowedDevOrigins` for `127.0.0.1` and `localhost` so `/_next/*` assets keep working.
+
+### Packaged UI cannot create workspaces / API looks dead
+
+Packaged mode serves the static export from an ephemeral loopback port (for example `http://127.0.0.1:51058`) while the FastAPI sidecar listens on `:8765`. Two layers keep the renderer working:
+
+1. API CORS allows any `http://127.0.0.1:<port>` / `http://localhost:<port>` origin.
+2. The desktop static server reverse-proxies `/api` and `/health` to the sidecar and the preload exposes that same-origin base URL as `helixDesktop.apiBaseUrl`.
+
+If Create workspace / Seed appears inert, confirm the activity banner is not showing “API sidecar unavailable”, then rebuild:
+
+```bash
+cd apps/desktop
+npm run pack
+open release/mac/HelixOS.app
+```
+
 ## Remaining Work
 
 - Production release URL for auto-update (currently placeholder domain)
 - Full `npm run pack` CI pipeline with embedded Python download on all platforms
-- Static export path for packaged web bundle (dev loads Next.js server today)
+- Application icon / code signing for distribution builds

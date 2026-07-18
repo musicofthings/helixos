@@ -66,6 +66,12 @@ rejected with `422 invalid_update` rather than overwriting the record.
 | `GET` | `/api/v1/projects/{project_id}` | Fetch a project |
 | `PATCH` | `/api/v1/projects/{project_id}` | Update project name/description/status |
 | `DELETE` | `/api/v1/projects/{project_id}` | Delete a project and every experiment inside it (204) |
+| `POST` | `/api/v1/protocols` | Create a reusable protocol in a workspace library |
+| `POST` | `/api/v1/protocols/import` | Import protocol shell from protocols.io / URL (fetch stubbed) |
+| `GET` | `/api/v1/protocols` | List protocols (`organization_id`, `workspace_id` filters) |
+| `GET` | `/api/v1/protocols/{protocol_id}` | Fetch a protocol |
+| `PATCH` | `/api/v1/protocols/{protocol_id}` | Update protocol name/description/status/steps |
+| `DELETE` | `/api/v1/protocols/{protocol_id}` | Delete a protocol (204) |
 | `POST` | `/api/v1/experiments` | Create an experiment + initial draft version |
 | `GET` | `/api/v1/experiments` | List experiments (`organization_id`, `project_id` filters) |
 | `GET` | `/api/v1/experiments/{experiment_id}` | Fetch an experiment (with HEAD version pointer) |

@@ -15,6 +15,10 @@ from helixos.eln.schemas import (
     Project,
     ProjectCreate,
     ProjectUpdate,
+    Protocol,
+    ProtocolCreate,
+    ProtocolImportRequest,
+    ProtocolUpdate,
     Sample,
     SampleCreate,
     SampleUpdate,
@@ -207,6 +211,59 @@ def delete_project(
 ) -> None:
     """Delete a project and every experiment (and below) inside it."""
     eln_service.delete_project(project_id, actor=actor)
+
+
+# --------------------------------------------------------------------------- #
+# Protocols
+# --------------------------------------------------------------------------- #
+@router.post("/protocols", response_model=Protocol, status_code=201)
+def create_protocol(
+    payload: ProtocolCreate, actor: Actor = Depends(get_current_actor)
+) -> Protocol:
+    """Create a reusable protocol in a workspace library."""
+    return eln_service.create_protocol(payload, actor=actor)
+
+
+@router.post("/protocols/import", response_model=Protocol, status_code=201)
+def import_protocol(
+    payload: ProtocolImportRequest, actor: Actor = Depends(get_current_actor)
+) -> Protocol:
+    """Import a protocol shell from protocols.io or a URL (fetch stubbed)."""
+    return eln_service.import_protocol(payload, actor=actor)
+
+
+@router.get("/protocols", response_model=list[Protocol])
+def list_protocols(
+    organization_id: str | None = Query(default=None),
+    workspace_id: str | None = Query(default=None),
+    actor: Actor = Depends(get_current_actor),
+) -> list[Protocol]:
+    """List protocols, optionally filtered by workspace."""
+    return eln_service.list_protocols(
+        actor=actor, organization_id=organization_id, workspace_id=workspace_id
+    )
+
+
+@router.get("/protocols/{protocol_id}", response_model=Protocol)
+def get_protocol(protocol_id: str, actor: Actor = Depends(get_current_actor)) -> Protocol:
+    """Fetch a protocol by id."""
+    return eln_service.get_protocol(protocol_id, actor=actor)
+
+
+@router.patch("/protocols/{protocol_id}", response_model=Protocol)
+def update_protocol(
+    protocol_id: str, payload: ProtocolUpdate, actor: Actor = Depends(get_current_actor)
+) -> Protocol:
+    """Update a protocol's mutable fields."""
+    return eln_service.update_protocol(protocol_id, payload, actor=actor)
+
+
+@router.delete("/protocols/{protocol_id}", status_code=204)
+def delete_protocol(
+    protocol_id: str, actor: Actor = Depends(get_current_actor)
+) -> None:
+    """Delete a protocol from the workspace library."""
+    eln_service.delete_protocol(protocol_id, actor=actor)
 
 
 # --------------------------------------------------------------------------- #

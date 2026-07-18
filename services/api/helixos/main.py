@@ -35,12 +35,8 @@ def create_app() -> FastAPI:
 
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=[
-            "http://127.0.0.1:3000",
-            "http://localhost:3000",
-            "http://127.0.0.1:8765",
-            "http://localhost:8765",
-        ],
+        # Dev web (:3000) plus packaged Electron static UI (ephemeral loopback port).
+        allow_origin_regex=r"https?://(127\.0\.0\.1|localhost)(:\d+)?",
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
