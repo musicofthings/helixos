@@ -28,6 +28,29 @@ function shouldProxy(pathname: string): boolean {
 }
 
 /**
+ * Resolve a request pathname under ``root``, rejecting path traversal.
+ * Returns null when the target escapes the static root.
+ */
+export function resolveSafeStaticPath(root: string, pathname: string): string | null {
+  const base = path.resolve(root);
+  let relative = pathname;
+  if (relative.endsWith("/")) {
+    relative = `${relative}index.html`;
+  }
+  if (relative === "" || relative === "/") {
+    relative = "/index.html";
+  }
+  // Strip leading slashes so path.resolve never treats the segment as absolute.
+  relative = relative.replace(/^\/+/, "");
+  const resolved = path.resolve(base, relative);
+  const out = path.relative(base, resolved);
+  if (out.startsWith("..") || path.isAbsolute(out)) {
+    return null;
+  }
+  return resolved;
+}
+
+/**
  * Serve the Next.js static export over loopback HTTP so absolute "/_next/..."
  * asset URLs resolve. Loading via file:// breaks those paths (unstyled UI).
  *
@@ -38,6 +61,7 @@ export class WebStaticServer {
   private server: http.Server | null = null;
   private port: number | null = null;
   private apiProxyTarget: string | null = null;
+  private startPromise: Promise<number> | null = null;
 
   get baseUrl(): string | null {
     return this.port ? `http://127.0.0.1:${this.port}` : null;
@@ -48,10 +72,21 @@ export class WebStaticServer {
   }
 
   async start(webRoot: string, preferredPort = 0): Promise<number> {
-    if (this.server && this.port) {
+    if (this.port) {
       return this.port;
     }
+    if (this.startPromise) {
+      return this.startPromise;
+    }
+    this.startPromise = this.bindServer(webRoot, preferredPort);
+    try {
+      return await this.startPromise;
+    } finally {
+      this.startPromise = null;
+    }
+  }
 
+  private async bindServer(webRoot: string, preferredPort: number): Promise<number> {
     const root = path.resolve(webRoot);
     if (!existsSync(root)) {
       throw new Error(`Packaged web root not found: ${root}`);
@@ -65,16 +100,16 @@ export class WebStaticServer {
           return;
         }
 
-        let pathname = decodeURIComponent(requestUrl.pathname);
-        if (pathname.endsWith("/")) {
-          pathname = `${pathname}index.html`;
-        }
-        if (pathname === "") {
-          pathname = "/index.html";
+        let pathname: string;
+        try {
+          pathname = decodeURIComponent(requestUrl.pathname);
+        } catch {
+          response.writeHead(400).end("Bad path");
+          return;
         }
 
-        const resolved = path.normalize(path.join(root, pathname));
-        if (!resolved.startsWith(root)) {
+        const resolved = resolveSafeStaticPath(root, pathname);
+        if (!resolved) {
           response.writeHead(403).end("Forbidden");
           return;
         }
@@ -86,7 +121,11 @@ export class WebStaticServer {
             filePath = withIndex;
           } else if (existsSync(path.join(root, "404.html"))) {
             response.writeHead(404, { "Content-Type": "text/html; charset=utf-8" });
-            createReadStream(path.join(root, "404.html")).pipe(response);
+            const notFound = createReadStream(path.join(root, "404.html"));
+            notFound.on("error", () => {
+              if (!response.writableEnded) response.end();
+            });
+            notFound.pipe(response);
             return;
           } else {
             response.writeHead(404).end("Not found");
@@ -95,19 +134,38 @@ export class WebStaticServer {
         }
 
         response.writeHead(200, { "Content-Type": contentTypeFor(filePath) });
-        createReadStream(filePath).pipe(response);
+        const stream = createReadStream(filePath);
+        stream.on("error", () => {
+          if (!response.headersSent) {
+            response.writeHead(404).end("Not found");
+          } else if (!response.writableEnded) {
+            response.end();
+          }
+        });
+        stream.pipe(response);
       } catch (error) {
-        response.writeHead(500).end(error instanceof Error ? error.message : "Server error");
+        if (!response.headersSent) {
+          response.writeHead(500).end(error instanceof Error ? error.message : "Server error");
+        } else if (!response.writableEnded) {
+          response.end();
+        }
       }
     });
 
-    await new Promise<void>((resolve, reject) => {
-      this.server!.once("error", reject);
-      this.server!.listen(preferredPort, "127.0.0.1", () => resolve());
-    });
+    try {
+      await new Promise<void>((resolve, reject) => {
+        this.server!.once("error", reject);
+        this.server!.listen(preferredPort, "127.0.0.1", () => resolve());
+      });
+    } catch (error) {
+      this.server = null;
+      throw error;
+    }
 
     const address = this.server.address();
     if (!address || typeof address === "string") {
+      this.server.close();
+      this.server = null;
       throw new Error("Failed to bind packaged web static server");
     }
     this.port = address.port;
@@ -165,6 +223,7 @@ export class WebStaticServer {
     this.server = null;
     this.port = null;
     this.apiProxyTarget = null;
+    this.startPromise = null;
     if (!server) return;
     await new Promise<void>((resolve) => {
       server.close(() => resolve());

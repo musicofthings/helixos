@@ -544,18 +544,21 @@ class ElnService:
         by_id: dict[str, Protocol] = {}
         if organization_id is not None:
             if organization_id in actor.organization_ids:
+                # Org members already see every workspace protocol in the org;
+                # skip the per-share N+1 loop.
                 for protocol in self._store.list_protocols([organization_id]):
                     by_id[protocol.id] = protocol
-            for share in self._store.list_shares_for_subject(actor.subject):
-                workspace = self._store.get_workspace(share.workspace_id)
-                if workspace is None or workspace.organization_id != organization_id:
-                    continue
-                for protocol in self._store.list_protocols(
-                    [organization_id], workspace_id=workspace.id
-                ):
-                    by_id[protocol.id] = protocol
-            if not by_id and organization_id not in actor.organization_ids:
-                organization_service.require_access(actor, organization_id)
+            else:
+                for share in self._store.list_shares_for_subject(actor.subject):
+                    workspace = self._store.get_workspace(share.workspace_id)
+                    if workspace is None or workspace.organization_id != organization_id:
+                        continue
+                    for protocol in self._store.list_protocols(
+                        [organization_id], workspace_id=workspace.id
+                    ):
+                        by_id[protocol.id] = protocol
+                if not by_id:
+                    organization_service.require_access(actor, organization_id)
         else:
             if actor.organization_ids:
                 for protocol in self._store.list_protocols(actor.organization_ids):
@@ -593,7 +596,10 @@ class ElnService:
         if not updates:
             return protocol
         updated = protocol.model_copy(update={**updates, "updated_at": _now()})
-        self._store.update_protocol(updated)
+        try:
+            self._store.update_protocol(updated)
+        except KeyError as exc:
+            raise _not_found("protocol", protocol_id) from exc
         audit_service.record(
             organization_id=updated.organization_id,
             actor=actor,
@@ -628,12 +634,6 @@ class ElnService:
         yet — this persists source metadata and a placeholder step so the UI
         import flow works end-to-end.
         """
-        if payload.source_provider == ProtocolSourceProvider.MANUAL:
-            raise api_error(
-                status_code=400,
-                code="invalid_import_source",
-                message="Import requires protocols_io or url as source_provider.",
-            )
         if not payload.source_url and not payload.source_external_id:
             raise api_error(
                 status_code=400,
@@ -670,7 +670,7 @@ class ElnService:
                     ),
                 )
             ],
-            source_provider=payload.source_provider,
+            source_provider=ProtocolSourceProvider(payload.source_provider.value),
             source_url=payload.source_url,
             source_external_id=payload.source_external_id,
         )

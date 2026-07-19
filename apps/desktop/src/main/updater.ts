@@ -20,5 +20,10 @@ export function setupAutoUpdater(): void {
     console.log("[helix-updater] Update downloaded; will install on quit");
   });
 
-  void autoUpdater.checkForUpdatesAndNotify();
+  // Local `--dir` packs often lack app-update.yml; catch the promise so the
+  // rejection does not surface as an unhandledRejection warning.
+  void autoUpdater.checkForUpdatesAndNotify().catch((error: unknown) => {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error("[helix-updater]", message);
+  });
 }

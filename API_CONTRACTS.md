@@ -67,7 +67,7 @@ rejected with `422 invalid_update` rather than overwriting the record.
 | `PATCH` | `/api/v1/projects/{project_id}` | Update project name/description/status |
 | `DELETE` | `/api/v1/projects/{project_id}` | Delete a project and every experiment inside it (204) |
 | `POST` | `/api/v1/protocols` | Create a reusable protocol in a workspace library |
-| `POST` | `/api/v1/protocols/import` | Import protocol shell from protocols.io / URL (fetch stubbed) |
+| `POST` | `/api/v1/protocols/import` | Import protocol shell from `protocols_io` / `url` (fetch stubbed; `manual` rejected at schema) |
 | `GET` | `/api/v1/protocols` | List protocols (`organization_id`, `workspace_id` filters) |
 | `GET` | `/api/v1/protocols/{protocol_id}` | Fetch a protocol |
 | `PATCH` | `/api/v1/protocols/{protocol_id}` | Update protocol name/description/status/steps |

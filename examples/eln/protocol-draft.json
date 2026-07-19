@@ -1,0 +1,25 @@
+{
+  "id": "prot_demo_gibson",
+  "organization_id": "org_demo",
+  "workspace_id": "ws_molecular",
+  "name": "Gibson assembly",
+  "description": "Standard Gibson assembly of a reporter insert into a backbone.",
+  "status": "draft",
+  "steps": [
+    {
+      "order": 1,
+      "title": "Thaw reagents",
+      "body": "Thaw Gibson master mix on ice."
+    },
+    {
+      "order": 2,
+      "title": "Assemble",
+      "body": "Combine equimolar fragments and incubate per kit protocol."
+    }
+  ],
+  "source_provider": "manual",
+  "source_url": null,
+  "source_external_id": null,
+  "created_at": "2026-07-18T00:00:00Z",
+  "updated_at": "2026-07-18T00:00:00Z"
+}

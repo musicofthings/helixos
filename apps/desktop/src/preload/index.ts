@@ -70,29 +70,16 @@ ipcRenderer.on(HELIX_IPC_CHANNELS.sidecarStatus, (_event, payload: SidecarStatus
   notifySidecarStatus(payload);
 });
 
-// Expose getters so renderer reads stay live under contextBridge cloning.
+// contextBridge only reliably supports functions + primitives (not getters).
+// Expose live accessors so the renderer always reads current bridgeState.
 contextBridge.exposeInMainWorld("helixDesktop", {
-  get apiBaseUrl() {
-    return bridgeState.apiBaseUrl;
-  },
-  get apiToken() {
-    return bridgeState.apiToken;
-  },
-  get webBaseUrl() {
-    return bridgeState.webBaseUrl;
-  },
-  get mcpBridgeUrl() {
-    return bridgeState.mcpBridgeUrl;
-  },
-  get platform() {
-    return bridgeState.platform;
-  },
-  get sidecarStatus() {
-    return bridgeState.sidecarStatus;
-  },
-  get isDesktop() {
-    return true as const;
-  }
+  getApiBaseUrl: () => bridgeState.apiBaseUrl,
+  getApiToken: () => bridgeState.apiToken,
+  getWebBaseUrl: () => bridgeState.webBaseUrl,
+  getMcpBridgeUrl: () => bridgeState.mcpBridgeUrl,
+  getPlatform: () => bridgeState.platform,
+  getSidecarStatus: () => bridgeState.sidecarStatus,
+  isDesktop: true as const
 });
 
 contextBridge.exposeInMainWorld("helixDesktopActions", {

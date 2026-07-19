@@ -52,7 +52,7 @@ export function isDesktopShell(): boolean {
 
 export function getApiBaseUrl(): string {
   if (typeof window !== "undefined") {
-    const bridgeUrl = window.helixDesktop?.apiBaseUrl;
+    const bridgeUrl = window.helixDesktop?.getApiBaseUrl?.();
     if (bridgeUrl) {
       return bridgeUrl;
     }
@@ -68,7 +68,7 @@ export function getApiBaseUrl(): string {
 
 export function getApiToken(): string {
   if (typeof window !== "undefined") {
-    const bridgeToken = window.helixDesktop?.apiToken;
+    const bridgeToken = window.helixDesktop?.getApiToken?.();
     if (bridgeToken) {
       return bridgeToken;
     }
@@ -87,7 +87,7 @@ export function getSidecarStatus(): "starting" | "ready" | "error" | "stopped" |
     return undefined;
   }
 
-  return window.helixDesktop?.sidecarStatus;
+  return window.helixDesktop?.getSidecarStatus?.();
 }
 
 export function createHelixClient(): HelixOSClient {

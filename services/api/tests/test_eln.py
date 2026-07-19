@@ -264,6 +264,68 @@ def test_protocol_crud_and_import_stub(client: TestClient) -> None:
         == 404
     )
 
+    manual_import = client.post(
+        "/api/v1/protocols/import",
+        headers=ORG_DEMO_HEADERS,
+        json={
+            "organization_id": "org_demo",
+            "workspace_id": workspace["id"],
+            "source_provider": "manual",
+            "source_url": "https://example.com/protocol",
+        },
+    )
+    assert manual_import.status_code == 422, manual_import.text
+
+
+@pytest.mark.parametrize("client", CLIENT_FIXTURES, indirect=True)
+def test_protocol_shared_viewer_cannot_mutate(client: TestClient) -> None:
+    """Workspace viewers can read protocols but cannot patch or delete them."""
+    workspace = client.post(
+        "/api/v1/workspaces",
+        headers=ADMIN_HEADERS,
+        json={
+            "organization_id": "org_qc",
+            "name": "Shared protocol lab",
+            "category": "custom",
+        },
+    ).json()
+    protocol = client.post(
+        "/api/v1/protocols",
+        headers=ADMIN_HEADERS,
+        json={
+            "organization_id": "org_qc",
+            "workspace_id": workspace["id"],
+            "name": "Owner protocol",
+            "steps": [{"order": 1, "title": "Step", "body": "Do the thing."}],
+        },
+    ).json()
+
+    share = client.post(
+        f"/api/v1/workspaces/{workspace['id']}/shares",
+        headers=ADMIN_HEADERS,
+        json={"subject": "user_demo_scientist", "role": "viewer"},
+    )
+    assert share.status_code == 201, share.text
+
+    listed = client.get(
+        f"/api/v1/protocols?organization_id=org_qc&workspace_id={workspace['id']}",
+        headers=ORG_DEMO_HEADERS,
+    )
+    assert listed.status_code == 200, listed.text
+    assert any(item["id"] == protocol["id"] for item in listed.json())
+
+    patched = client.patch(
+        f"/api/v1/protocols/{protocol['id']}",
+        headers=ORG_DEMO_HEADERS,
+        json={"name": "Hijacked"},
+    )
+    assert patched.status_code == 403, patched.text
+
+    deleted = client.delete(
+        f"/api/v1/protocols/{protocol['id']}", headers=ORG_DEMO_HEADERS
+    )
+    assert deleted.status_code == 403, deleted.text
+
 
 @pytest.mark.parametrize("client", CLIENT_FIXTURES, indirect=True)
 def test_cross_tenant_delete_is_blocked(client: TestClient) -> None:

@@ -383,15 +383,16 @@ class SqlElnStore:
     def update_protocol(self, protocol: Protocol) -> Protocol:
         with session_scope() as session:
             row = session.get(ProtocolORM, protocol.id)
-            if row is not None:
-                row.name = protocol.name
-                row.description = protocol.description
-                row.status = protocol.status.value
-                row.steps = [step.model_dump() for step in protocol.steps]
-                row.source_provider = protocol.source_provider.value
-                row.source_url = protocol.source_url
-                row.source_external_id = protocol.source_external_id
-                row.updated_at = protocol.updated_at
+            if row is None:
+                raise KeyError(f"protocol:{protocol.id}")
+            row.name = protocol.name
+            row.description = protocol.description
+            row.status = protocol.status.value
+            row.steps = [step.model_dump() for step in protocol.steps]
+            row.source_provider = protocol.source_provider.value
+            row.source_url = protocol.source_url
+            row.source_external_id = protocol.source_external_id
+            row.updated_at = protocol.updated_at
         return protocol
 
     def delete_protocol(self, protocol_id: str) -> None:

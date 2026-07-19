@@ -285,6 +285,13 @@ class ProtocolSourceProvider(StrEnum):
     URL = "url"
 
 
+class ProtocolImportSourceProvider(StrEnum):
+    """External sources accepted by POST /protocols/import (excludes manual)."""
+
+    PROTOCOLS_IO = "protocols_io"
+    URL = "url"
+
+
 class ProtocolStep(BaseModel):
     """One ordered step in a protocol."""
 
@@ -329,7 +336,7 @@ class ProtocolImportRequest(BaseModel):
 
     organization_id: str
     workspace_id: str
-    source_provider: ProtocolSourceProvider = ProtocolSourceProvider.PROTOCOLS_IO
+    source_provider: ProtocolImportSourceProvider = ProtocolImportSourceProvider.PROTOCOLS_IO
     source_url: str | None = None
     source_external_id: str | None = None
     name: str | None = Field(default=None, min_length=1)
