@@ -4,7 +4,11 @@ AI-native Laboratory Management & Molecular Biology Platform.
 
 HelixOS combines ELN, molecular biology tooling, AI copilots, MCP connectors, and a hash-chained audit trail in one workspace. It ships as a **browser stack** (Next.js + FastAPI) and a **desktop app** (Electron + local sidecar + MCP bridge).
 
-**New here?** Read in order: [docs/OVERVIEW.md](docs/OVERVIEW.md) → [SYSTEM_ARCHITECTURE.md](SYSTEM_ARCHITECTURE.md) → [docs/README.md](docs/README.md).
+**Website:** [musicofthings.github.io/helixos](https://musicofthings.github.io/helixos/) — product overview and macOS download.
+
+**Download:** [Latest GitHub Release](https://github.com/musicofthings/helixos/releases/latest) (`HelixOS-mac-x64.dmg`; not Apple-notarized yet).
+
+**New here?** Read in order: [docs/OVERVIEW.md](docs/OVERVIEW.md) → [SYSTEM_ARCHITECTURE.md](SYSTEM_ARCHITECTURE.md) → [docs/README.md](docs/README.md). Landing site notes: [docs/SITE.md](docs/SITE.md).
 
 **Resuming work?** Read [SESSION_HANDOVER.md](SESSION_HANDOVER.md) for current state, uncommitted changes, and production next steps.
 
@@ -17,6 +21,8 @@ Local browser and desktop stacks work end-to-end. The shared web app (`apps/web`
 | Browser dev stack | Working (`npm run dev:browser`) |
 | Desktop dev stack | Working (`npm run dev:desktop`) |
 | Packaged desktop (local) | Working (`cd apps/desktop && npm run pack`) — static UI over loopback + API proxy/CORS |
+| Public website | [`apps/site`](apps/site) → GitHub Pages ([docs/SITE.md](docs/SITE.md)) |
+| Desktop releases | Tag `v*.*.*` → Actions builds macOS DMG → GitHub Releases |
 | Workspace shell | Slack-style channels + workspace home + scoped lab notebook |
 | Workspace share / invites | Working (viewer/editor grants, invite links) |
 | ELN protocols library | In progress (CRUD + import stubs) |
@@ -40,6 +46,7 @@ Both `npm run dev:browser` and the desktop shell load the same Next.js app:
 ```txt
 apps/web/       Next.js workspace UI (browser + desktop)
 apps/desktop/   Electron shell + sidecar + MCP bridge
+apps/site/      Public landing site (GitHub Pages)
 services/api/   FastAPI backend (helixos.* domains)
 packages/       Shared TypeScript (api-client, types)
 schemas/        JSON Schema contracts
@@ -48,6 +55,7 @@ mcp/            Connector manifests and stdio servers
 prompts/        Agent system prompts
 agents/         Contributor playbooks
 scripts/        Dev setup and orchestration scripts
+.github/        Pages deploy + desktop release workflows
 ```
 
 ## Quick Start
@@ -65,6 +73,14 @@ Packaged local desktop:
 cd apps/desktop
 npm run pack
 open release/mac/HelixOS.app
+```
+
+Published macOS download (CI):
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+# → GitHub Release with HelixOS-mac-x64.dmg
 ```
 
 | Surface | URL |
@@ -96,6 +112,7 @@ Set `HELIX_DATABASE_URL=sqlite:///$(pwd)/.data/helixos-dev.db` for persistent EL
 | Contributor / agent rules | [AGENTS.md](AGENTS.md) |
 | Module deep-dives | [docs/modules/](docs/modules/) |
 | Desktop troubleshooting | [docs/modules/desktop.md](docs/modules/desktop.md) |
+| Public website | [docs/SITE.md](docs/SITE.md) |
 | Session handover | [SESSION_HANDOVER.md](SESSION_HANDOVER.md) |
 
 ## MVP Modules
