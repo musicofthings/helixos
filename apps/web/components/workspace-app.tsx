@@ -430,13 +430,56 @@ export function WorkspaceApp({ initialDesktopShell = false }: { initialDesktopSh
         id: "nav-workspace-home",
         label: "Go to workspace home",
         group: "Navigate",
-        run: () => setActiveView("workspace-home")
+        run: () => {
+          setShowWorkspaceCreate(false);
+          setActiveView("workspace-home");
+        }
       },
-      { id: "nav-experiments", label: "Go to lab notebook", group: "Navigate", run: () => setActiveView("experiments") },
-      { id: "nav-protocols", label: "Go to protocols", group: "Navigate", run: () => setActiveView("protocols") },
-      { id: "nav-sequences", label: "Go to sequences", group: "Navigate", run: () => setActiveView("sequences") },
-      { id: "nav-inventory", label: "Go to inventory", group: "Navigate", run: () => setActiveView("inventory") },
-      { id: "nav-connectors", label: "Go to connectors", group: "Navigate", run: () => setActiveView("connectors") },
+      {
+        id: "nav-experiments",
+        label: "Go to lab notebook",
+        group: "Navigate",
+        run: () => {
+          setShowWorkspaceCreate(false);
+          setActiveView("experiments");
+        }
+      },
+      {
+        id: "nav-protocols",
+        label: "Go to protocols",
+        group: "Navigate",
+        run: () => {
+          setShowWorkspaceCreate(false);
+          setActiveView("protocols");
+        }
+      },
+      {
+        id: "nav-sequences",
+        label: "Go to sequences",
+        group: "Navigate",
+        run: () => {
+          setShowWorkspaceCreate(false);
+          setActiveView("sequences");
+        }
+      },
+      {
+        id: "nav-inventory",
+        label: "Go to inventory",
+        group: "Navigate",
+        run: () => {
+          setShowWorkspaceCreate(false);
+          setActiveView("inventory");
+        }
+      },
+      {
+        id: "nav-connectors",
+        label: "Go to connectors",
+        group: "Navigate",
+        run: () => {
+          setShowWorkspaceCreate(false);
+          setActiveView("connectors");
+        }
+      },
       {
         id: "create-workspace",
         label: "Create workspace",
@@ -453,6 +496,7 @@ export function WorkspaceApp({ initialDesktopShell = false }: { initialDesktopSh
         group: "Lab",
         keywords: ["draft", "eln"],
         run: () => {
+          setShowWorkspaceCreate(false);
           setActiveView("experiments");
           setNewExperimentNonce((nonce) => nonce + 1);
         }

@@ -185,22 +185,26 @@ class MemoryElnStore:
         return protocol
 
     def get_protocol(self, protocol_id: str) -> Protocol | None:
-        return self._protocols.get(protocol_id)
+        with self._lock:
+            return self._protocols.get(protocol_id)
 
     def list_protocols(
         self, organization_ids: Sequence[str], workspace_id: str | None = None
     ) -> list[Protocol]:
         visible = set(organization_ids)
-        items = [
-            p
-            for p in self._protocols.values()
-            if p.organization_id in visible
-            and (workspace_id is None or p.workspace_id == workspace_id)
-        ]
+        with self._lock:
+            items = [
+                p
+                for p in self._protocols.values()
+                if p.organization_id in visible
+                and (workspace_id is None or p.workspace_id == workspace_id)
+            ]
         return sorted(items, key=lambda p: p.created_at)
 
     def update_protocol(self, protocol: Protocol) -> Protocol:
         with self._lock:
+            if protocol.id not in self._protocols:
+                raise KeyError(f"protocol:{protocol.id}")
             self._protocols[protocol.id] = protocol
         return protocol
 

@@ -121,6 +121,8 @@ export interface ProjectUpdate {
 
 export type ProtocolStatus = "draft" | "active" | "archived";
 export type ProtocolSourceProvider = "manual" | "protocols_io" | "url";
+/** Providers accepted by POST /protocols/import (excludes manual). */
+export type ProtocolImportSourceProvider = "protocols_io" | "url";
 
 export interface ProtocolStep {
   order: number;
@@ -164,7 +166,7 @@ export interface ProtocolUpdate {
 export interface ProtocolImportRequest {
   organization_id: string;
   workspace_id: string;
-  source_provider?: ProtocolSourceProvider;
+  source_provider?: ProtocolImportSourceProvider;
   source_url?: string | null;
   source_external_id?: string | null;
   name?: string | null;

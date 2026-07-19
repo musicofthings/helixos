@@ -113,7 +113,7 @@ macOS builds use `build/entitlements.mac.plist` for hardened runtime compatibili
 
 ## IPC Surface
 
-- `window.helixDesktop`: runtime config, sidecar status, MCP bridge URL
+- `window.helixDesktop`: live accessors (`getApiBaseUrl()`, `getSidecarStatus()`, …) plus `isDesktop` — functions so contextBridge reads stay current
 - `window.helixDesktopActions.restartSidecar()`: restart the API sidecar and reload the window
 
 ## Command Palette
@@ -130,7 +130,7 @@ The workspace exposes a Warp-style command palette with `⌘K` / `Ctrl+K` for na
 
 The renderer must wait for the API sidecar before issuing authenticated requests.
 
-- Preload exposes `window.helixDesktop.sidecarStatus` and `window.helixDesktopActions.onSidecarStatus(listener)`.
+- Preload exposes `window.helixDesktop.getSidecarStatus()` and `window.helixDesktopActions.onSidecarStatus(listener)`.
 - Status changes also dispatch a `helix:sidecar-status-changed` DOM event.
 - [`useDesktopShell`](../../apps/web/hooks/use-desktop-shell.ts) starts as `starting` and only enables API queries when status is `ready`.
 
@@ -192,7 +192,7 @@ Electron loads the Next dev server as `http://127.0.0.1:3000`. `apps/web/next.co
 Packaged mode serves the static export from an ephemeral loopback port (for example `http://127.0.0.1:51058`) while the FastAPI sidecar listens on `:8765`. Two layers keep the renderer working:
 
 1. API CORS allows any `http://127.0.0.1:<port>` / `http://localhost:<port>` origin.
-2. The desktop static server reverse-proxies `/api` and `/health` to the sidecar and the preload exposes that same-origin base URL as `helixDesktop.apiBaseUrl`.
+2. The desktop static server reverse-proxies `/api` and `/health` to the sidecar and the preload exposes that same-origin base URL via `helixDesktop.getApiBaseUrl()`.
 
 If Create workspace / Seed appears inert, confirm the activity banner is not showing “API sidecar unavailable”, then rebuild:
 

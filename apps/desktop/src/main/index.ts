@@ -189,6 +189,9 @@ function registerIpcHandlers(): void {
   });
 }
 
+/** Resolves once the first whenReady boot finishes (sidecar + first window). */
+let bootReady: Promise<void> | null = null;
+
 const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) {
   app.quit();
@@ -202,20 +205,30 @@ if (!gotLock) {
     }
   });
 
-  app.whenReady().then(async () => {
-    registerIpcHandlers();
-    runtimeConfig = await resolveWebEntry(loadDesktopConfig());
-    refreshMcpPaths(runtimeConfig);
-    await startMcpBridge(runtimeConfig);
-    await startSidecar(runtimeConfig);
-    setupAutoUpdater();
-    await createMainWindow();
+  app.whenReady().then(() => {
+    bootReady = (async () => {
+      registerIpcHandlers();
+      runtimeConfig = await resolveWebEntry(loadDesktopConfig());
+      refreshMcpPaths(runtimeConfig);
+      await startMcpBridge(runtimeConfig);
+      await startSidecar(runtimeConfig);
+      setupAutoUpdater();
+      await createMainWindow();
+    })();
+    return bootReady;
   });
 
   app.on("activate", () => {
-    if (BrowserWindow.getAllWindows().length === 0) {
-      void createMainWindow();
-    }
+    void (async () => {
+      // Wait for initial boot so activate cannot open a window against an
+      // unbound sidecar / half-started static server.
+      if (bootReady) {
+        await bootReady;
+      }
+      if (BrowserWindow.getAllWindows().length === 0) {
+        await createMainWindow();
+      }
+    })();
   });
 
   app.on("window-all-closed", () => {

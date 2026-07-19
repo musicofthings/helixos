@@ -63,20 +63,60 @@ export function LabView({
     setShowExperimentForm(false);
   }, [workspaceId]);
 
+  // Deep-link from workspace home: select the experiment's project before
+  // filtering the lab list, otherwise the visibility effect clears the id.
+  useEffect(() => {
+    if (!selectedExperimentId) return;
+    const target = (experimentsQuery.data ?? []).find(
+      (experiment) => experiment.id === selectedExperimentId
+    );
+    const projectId = target?.raw.project_id;
+    if (!projectId || projectId === selectedProjectId) return;
+    if (projects.some((project) => project.id === projectId)) {
+      setSelectedProjectId(projectId);
+    }
+  }, [selectedExperimentId, experimentsQuery.data, projects, selectedProjectId]);
+
   useEffect(() => {
     const stillThere = projects.some((project) => project.id === selectedProjectId);
     if (!stillThere) {
+      // Prefer the project of a deep-linked experiment over the first project.
+      const linked = (experimentsQuery.data ?? []).find(
+        (experiment) => experiment.id === selectedExperimentId
+      );
+      const linkedProjectId = linked?.raw.project_id;
+      if (linkedProjectId && projects.some((project) => project.id === linkedProjectId)) {
+        setSelectedProjectId(linkedProjectId);
+        return;
+      }
       setSelectedProjectId(projects[0]?.id);
     }
-  }, [projects, selectedProjectId]);
+  }, [projects, selectedProjectId, experimentsQuery.data, selectedExperimentId]);
 
   useEffect(() => {
     const stillVisible = experiments.some((experiment) => experiment.id === selectedExperimentId);
+    if (stillVisible) return;
+    // Wait for project switch when the selection lives in another project here.
+    const target = (experimentsQuery.data ?? []).find(
+      (experiment) => experiment.id === selectedExperimentId
+    );
+    if (
+      target?.raw.project_id &&
+      projects.some((project) => project.id === target.raw.project_id)
+    ) {
+      return;
+    }
     const next = experiments[0]?.id;
-    if (!stillVisible && selectedExperimentId !== next) {
+    if (selectedExperimentId !== next) {
       onSelectExperiment(next);
     }
-  }, [experiments, onSelectExperiment, selectedExperimentId]);
+  }, [
+    experiments,
+    experimentsQuery.data,
+    onSelectExperiment,
+    projects,
+    selectedExperimentId
+  ]);
 
   // Header "New experiment" button raises an intent: open the experiment form
   // when a project is selected, otherwise guide the user to create the missing
