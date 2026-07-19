@@ -22,7 +22,8 @@ Read these documents in order when onboarding to the platform. Each layer builds
 
 | Document | What you learn |
 | --- | --- |
-| [modules/desktop.md](modules/desktop.md) | Electron shell, API sidecar, MCP bridge, packaging |
+| [modules/desktop.md](modules/desktop.md) | Electron shell, API sidecar, MCP bridge, packaging, releases |
+| [SITE.md](SITE.md) | Public landing site (GitHub Pages) and download links |
 | [modules/auth.md](modules/auth.md) | Organizations, actors, tenant isolation |
 
 The web app (`apps/web`) is the shared workspace UI. In browser dev it talks to the API on port **8000**. In desktop dev it loads from port **3000** and talks to the sidecar on **8765** via preload/query params.

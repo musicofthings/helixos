@@ -86,9 +86,17 @@ Packaged apps prefer this order:
 
 Desktop audit data persists to SQLite at `<userData>/helixos/helixos.db` unless `HELIX_DATABASE_URL` is overridden. See [audit.md](audit.md).
 
+## Public Download And Releases
+
+- Landing page: [https://musicofthings.github.io/helixos/](https://musicofthings.github.io/helixos/) ([docs/SITE.md](../SITE.md))
+- Release workflow: [`.github/workflows/release-desktop.yml`](../../.github/workflows/release-desktop.yml) — push a `v*.*.*` tag to build a macOS DMG and attach `HelixOS-mac-x64.dmg` to the GitHub Release
+- Latest download: [github.com/musicofthings/helixos/releases/latest](https://github.com/musicofthings/helixos/releases/latest)
+
+CI builds are **unsigned / not Apple-notarized**. First launch may require allowing the app in System Settings → Privacy & Security. Windows/Linux release targets are deferred.
+
 ## Auto-update And Code Signing
 
-Packaged builds include `electron-updater` and check `https://releases.helixos.example/desktop` for updates on launch.
+Packaged builds include `electron-updater`. The publish URL in `electron-builder.json` is still a placeholder (`releases.helixos.example`); wire it to GitHub Releases when notarized auto-update is ready. Until then, disable checks locally with `HELIX_DISABLE_AUTOUPDATE=1` (CI release workflow sets this during the build).
 
 Environment controls:
 

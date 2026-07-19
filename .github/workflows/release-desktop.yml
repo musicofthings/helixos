@@ -1,0 +1,106 @@
+name: Release desktop (macOS)
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to create/publish (e.g. v0.1.0)"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-desktop-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  macos:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install root and workspace deps
+        run: |
+          npm ci
+          npm ci --prefix apps/web
+          npm ci --prefix apps/desktop
+          python -m pip install --upgrade pip
+          python -m pip install -e "services/api[desktop]"
+
+      - name: Resolve release tag
+        id: meta
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TAG="${{ inputs.tag }}"
+          else
+            TAG="${GITHUB_REF_NAME}"
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Build macOS DMG
+        working-directory: apps/desktop
+        env:
+          # Unsigned local/CI builds are expected until Apple signing secrets exist.
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+          HELIX_DISABLE_AUTOUPDATE: "1"
+        run: npm run dist
+
+      - name: Stage release assets
+        run: |
+          mkdir -p release-assets
+          # Prefer a stable download name for the landing page / release notes.
+          DMG=$(find apps/desktop/release -name '*.dmg' -type f | head -n 1)
+          if [ -z "$DMG" ]; then
+            echo "No DMG produced under apps/desktop/release" >&2
+            ls -laR apps/desktop/release || true
+            exit 1
+          fi
+          cp "$DMG" "release-assets/HelixOS-mac-x64.dmg"
+          # electron-updater metadata when present
+          if [ -f apps/desktop/release/latest-mac.yml ]; then
+            cp apps/desktop/release/latest-mac.yml release-assets/
+          fi
+          ls -la release-assets
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.meta.outputs.tag }}
+          name: HelixOS ${{ steps.meta.outputs.tag }}
+          generate_release_notes: true
+          files: release-assets/*
+          body: |
+            ## HelixOS ${{ steps.meta.outputs.tag }}
+
+            ### Download
+            - **macOS:** `HelixOS-mac-x64.dmg`
+
+            Builds are **not Apple-notarized** yet. On first open, use
+            System Settings → Privacy & Security if Gatekeeper blocks the app.
+
+            ### From source
+            ```bash
+            npm run setup
+            npm run dev:browser
+            ```
+
+            Website: https://musicofthings.github.io/helixos/
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

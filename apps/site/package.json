@@ -1,0 +1,10 @@
+{
+  "name": "@helixos/site",
+  "version": "0.1.0",
+  "private": true,
+  "description": "HelixOS public landing site (GitHub Pages)",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "preview": "npx --yes serve dist -p 4173"
+  }
+}
