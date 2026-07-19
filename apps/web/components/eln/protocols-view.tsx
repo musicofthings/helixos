@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useRef, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { LoaderCircle, Plus, Trash2 } from "lucide-react";
 import type { Protocol, ProtocolStep, Workspace } from "@helixos/types";
 
@@ -33,7 +33,7 @@ export function ProtocolsView({
   const deleteProtocol = useDeleteProtocol(organizationId, workspaceId);
   const importProtocol = useImportProtocol(organizationId, workspaceId);
 
-  const protocols = protocolsQuery.data ?? [];
+  const protocols = useMemo(() => protocolsQuery.data ?? [], [protocolsQuery.data]);
   const [selectedId, setSelectedId] = useState<string | undefined>();
   const [mode, setMode] = useState<"view" | "create" | "import">("view");
   const [name, setName] = useState("");
@@ -56,7 +56,7 @@ export function ProtocolsView({
 
   // Hydrate the edit form only when the selected protocol id (or mode) changes,
   // not on every react-query refetch of the same protocol object identity.
-  const hydratedProtocolId = useRef<string | undefined>();
+  const hydratedProtocolId = useRef<string | undefined>(undefined);
   useEffect(() => {
     if (mode !== "view") {
       hydratedProtocolId.current = undefined;
