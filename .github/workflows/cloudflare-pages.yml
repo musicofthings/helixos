@@ -36,13 +36,14 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           CLOUDFLARE_PAGES_PROJECT: ${{ vars.CLOUDFLARE_PAGES_PROJECT }}
+          DEPLOY_BRANCH: ${{ github.head_ref }}
         run: >
           npx --yes wrangler@4 pages deploy apps/site/dist
           --project-name "${CLOUDFLARE_PAGES_PROJECT:-helixos}"
-          --branch "${{ github.head_ref }}"
+          --branch "$DEPLOY_BRANCH"
 
   deploy-production:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
