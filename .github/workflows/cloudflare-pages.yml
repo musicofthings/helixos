@@ -38,7 +38,7 @@ jobs:
           CLOUDFLARE_PAGES_PROJECT: ${{ vars.CLOUDFLARE_PAGES_PROJECT }}
         run: >
           npx --yes wrangler@4 pages deploy apps/site/dist
-          --project-name "${CLOUDFLARE_PAGES_PROJECT:-helixos-site}"
+          --project-name "${CLOUDFLARE_PAGES_PROJECT:-helixos}"
           --branch "${{ github.head_ref }}"
 
   deploy-production:
@@ -63,5 +63,5 @@ jobs:
           CLOUDFLARE_PAGES_PROJECT: ${{ vars.CLOUDFLARE_PAGES_PROJECT }}
         run: >
           npx --yes wrangler@4 pages deploy apps/site/dist
-          --project-name "${CLOUDFLARE_PAGES_PROJECT:-helixos-site}"
+          --project-name "${CLOUDFLARE_PAGES_PROJECT:-helixos}"
           --branch "main"

@@ -56,7 +56,7 @@ Set these GitHub repository secrets:
 
 Optional repository variable:
 
-- `CLOUDFLARE_PAGES_PROJECT` (defaults to `helixos-site`)
+- `CLOUDFLARE_PAGES_PROJECT` (defaults to `helixos`)
 
 ### One-time Cloudflare API token setup
 
