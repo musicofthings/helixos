@@ -101,6 +101,7 @@ jobs:
             npm run dev:browser
             ```
 
-            Website: https://musicofthings.github.io/helixos/
+            Website: https://helixos.pages.dev/
+            Theme: light pastel by default, with an optional dark toggle in the header.
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
