@@ -88,7 +88,7 @@ Desktop audit data persists to SQLite at `<userData>/helixos/helixos.db` unless 
 
 ## Public Download And Releases
 
-- Landing page: [https://musicofthings.github.io/helixos/](https://musicofthings.github.io/helixos/) ([docs/SITE.md](../SITE.md))
+- Landing page: [https://helixos.pages.dev/](https://helixos.pages.dev/) ([docs/SITE.md](../SITE.md))
 - Release workflow: [`.github/workflows/release-desktop.yml`](../../.github/workflows/release-desktop.yml) — push a `v*.*.*` tag to build a macOS DMG and attach `HelixOS-mac-x64.dmg` to the GitHub Release
 - Latest download: [github.com/musicofthings/helixos/releases/latest](https://github.com/musicofthings/helixos/releases/latest)
 
