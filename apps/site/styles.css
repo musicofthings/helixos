@@ -271,30 +271,6 @@ model-viewer {
     radial-gradient(circle at 80% 60%, var(--hero-glow-warm), transparent 62%);
 }
 
-.model-fallback {
-  margin: 0;
-  position: absolute;
-  inset: 0;
-  display: none;
-  align-items: center;
-  justify-content: center;
-  background: var(--surface-strong);
-}
-
-.model-fallback img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-}
-
-.model-shell.show-fallback model-viewer {
-  display: none;
-}
-
-.model-shell.show-fallback .model-fallback {
-  display: flex;
-}
-
 .model-caption {
   margin: 0;
   padding: 0.75rem 0.95rem;

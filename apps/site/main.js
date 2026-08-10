@@ -73,25 +73,11 @@ if (stage && !window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
 }
 
 const modelShell = document.querySelector("[data-model-shell]");
-const modelFallback = document.querySelector("[data-model-fallback]");
 const modelElement = document.querySelector("#lab-model");
 
-if (modelShell && modelFallback && modelElement) {
-  let didLoad = false;
-  const showFallback = () => {
-    if (!didLoad) {
-      modelShell.classList.add("show-fallback");
-    }
-  };
-
-  const timeoutId = window.setTimeout(showFallback, 4000);
-  modelElement.addEventListener("load", () => {
-    didLoad = true;
-    modelShell.classList.remove("show-fallback");
-    window.clearTimeout(timeoutId);
-  });
+if (modelShell && modelElement) {
+  // If the GLB fails to load, hide the shell so the poster image shows cleanly.
   modelElement.addEventListener("error", () => {
-    showFallback();
-    window.clearTimeout(timeoutId);
+    modelShell.style.minHeight = "auto";
   });
 }
