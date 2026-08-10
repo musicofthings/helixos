@@ -57,27 +57,3 @@ const observer = new IntersectionObserver(
 for (const el of revealTargets) {
   observer.observe(el);
 }
-
-// Subtle parallax on the hero stage for presence without noise.
-const stage = document.querySelector(".hero-stage");
-if (stage && !window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
-  window.addEventListener(
-    "pointermove",
-    (event) => {
-      const x = (event.clientX / window.innerWidth - 0.5) * 8;
-      const y = (event.clientY / window.innerHeight - 0.5) * 6;
-      stage.style.transform = `translate3d(${x}px, ${y}px, 0)`;
-    },
-    { passive: true }
-  );
-}
-
-const modelShell = document.querySelector("[data-model-shell]");
-const modelElement = document.querySelector("#lab-model");
-
-if (modelShell && modelElement) {
-  // If the GLB fails to load, hide the shell so the poster image shows cleanly.
-  modelElement.addEventListener("error", () => {
-    modelShell.style.minHeight = "auto";
-  });
-}

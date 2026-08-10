@@ -247,38 +247,6 @@ a {
   font-size: 0.88rem;
 }
 
-.hero-stage {
-  margin-top: clamp(1.5rem, 4vh, 2.75rem);
-  opacity: 0;
-  transform: translateY(28px) scale(0.985);
-  animation: stage-in 1.1s cubic-bezier(0.2, 0.8, 0.2, 1) 0.55s forwards;
-}
-
-.model-shell {
-  position: relative;
-  min-height: 360px;
-  border: 1px solid var(--line);
-  border-radius: 18px;
-  overflow: hidden;
-  background: var(--panel);
-  box-shadow: 0 30px 80px var(--shadow);
-}
-
-model-viewer {
-  width: 100%;
-  min-height: 360px;
-  background: radial-gradient(circle at 30% 30%, var(--hero-glow), transparent 55%),
-    radial-gradient(circle at 80% 60%, var(--hero-glow-warm), transparent 62%);
-}
-
-.model-caption {
-  margin: 0;
-  padding: 0.75rem 0.95rem;
-  border-top: 1px solid var(--line);
-  font-size: 0.82rem;
-  color: var(--mist);
-}
-
 .band {
   max-width: 800px;
   margin: 0 auto;
@@ -526,13 +494,6 @@ model-viewer {
   to {
     opacity: 1;
     transform: translateY(0);
-  }
-}
-
-@keyframes stage-in {
-  to {
-    opacity: 1;
-    transform: translateY(0) scale(1);
   }
 }
 
