@@ -149,6 +149,21 @@ a {
   gap: 1rem;
 }
 
+.hero-banner {
+  margin: 0;
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  overflow: hidden;
+  background: var(--surface);
+  box-shadow: 0 24px 60px var(--shadow);
+}
+
+.hero-banner img {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
 .brand {
   margin: 0;
   font-family: var(--font-display);
@@ -294,6 +309,14 @@ model-viewer {
   padding: 4rem clamp(1.25rem, 4vw, 3rem) 1.5rem;
 }
 
+.story-grid {
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 1.5rem clamp(1.25rem, 4vw, 3rem) 3rem;
+  display: grid;
+  gap: 1.25rem;
+}
+
 .band h2,
 .split h3,
 .start-block h3 {
@@ -337,11 +360,95 @@ model-viewer {
   color: var(--mist);
 }
 
+.story-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 0.95fr);
+  gap: 1.25rem;
+  align-items: center;
+}
+
+.story-row.reverse .story-copy {
+  order: 2;
+}
+
+.story-row.reverse .story-media {
+  order: 1;
+}
+
+.story-copy {
+  padding: 1.5rem 0;
+}
+
+.eyebrow {
+  margin: 0 0 0.35rem;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: var(--acid-deep);
+}
+
+.story-copy h3 {
+  margin: 0 0 0.75rem;
+  font-family: var(--font-display);
+  font-size: clamp(1.5rem, 3vw, 2rem);
+  line-height: 1.15;
+}
+
+.story-copy p {
+  margin: 0 0 0.75rem;
+  color: var(--mist);
+}
+
+.story-media {
+  margin: 0;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  overflow: hidden;
+  background: var(--surface);
+  box-shadow: 0 24px 60px var(--shadow);
+}
+
+.story-media img {
+  display: block;
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  object-fit: cover;
+}
+
 .start-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 1.25rem;
   margin-top: 1.75rem;
+}
+
+.fleet-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(280px, 0.8fr);
+  gap: 1.25rem;
+  margin-top: 1.75rem;
+  align-items: start;
+}
+
+.fleet-visual {
+  margin: 0;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  overflow: hidden;
+  background: var(--surface);
+  box-shadow: 0 24px 60px var(--shadow);
+}
+
+.fleet-visual img {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.fleet-copy {
+  display: grid;
+  gap: 1rem;
 }
 
 .metrics-grid {
@@ -472,8 +579,14 @@ model-viewer {
 
   .split,
   .start-grid,
-  .metrics-grid {
+  .metrics-grid,
+  .story-row {
     grid-template-columns: 1fr;
+  }
+
+  .story-row.reverse .story-copy,
+  .story-row.reverse .story-media {
+    order: initial;
   }
 
   .hero {

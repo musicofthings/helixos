@@ -36,7 +36,7 @@
       <div class="top-actions">
         <nav class="top-nav">
           <a href="#product">Product</a>
-          <a href="#how-to-use">How to use</a>
+          <a href="#story">Story</a>
           <a href="#traction">Traction</a>
           <a href="#investors">Investors</a>
           <a href="https://github.com/musicofthings/helixos">GitHub</a>
@@ -55,10 +55,17 @@
 
     <main>
       <section class="hero" id="top">
+        <figure class="hero-banner">
+          <img
+            src="./assets/images/Meshy_AI_helixos-lab-automation-hero-v3.png"
+            alt="HelixOS hero artwork showing lab automation control surfaces"
+            loading="eager"
+          />
+        </figure>
         <p class="brand">HelixOS</p>
-        <h1>AI-native operating system for next-generation labs.</h1>
+        <h1>The software layer that controls your lab robots.</h1>
         <p class="lede">
-          We are building a unified system for ELN, molecular design, AI copilots, and connector-driven automation — with an audit trail designed for regulated science.
+          Your robots already do the work. HelixOS orchestrates them with protocols, AI reasoning, live experiment state, and audit-grade traceability — so the lab runs as one system.
         </p>
         <div class="cta">
           <a
@@ -73,9 +80,9 @@
           <div class="model-shell" data-model-shell>
             <model-viewer
               id="lab-model"
-              src="./assets/3d/helixos-lab.gltf"
-              poster="./assets/3d/helixos-lab-poster.svg"
-              alt="3D concept render of HelixOS lab workflow states"
+              src="./assets/3d/Meshy_AI_helixos_lab_automatio_0810190211_image-to-3d-texture.glb"
+              poster="./assets/images/Meshy_AI_helixos-lab-automation-hero-v3.png"
+              alt="3D render of the HelixOS lab control layer"
               camera-controls
               auto-rotate
               interaction-prompt="none"
@@ -83,86 +90,92 @@
             ></model-viewer>
             <figure class="model-fallback" data-model-fallback>
               <img
-                src="./assets/3d/helixos-lab-poster.svg"
-                alt="HelixOS platform 3D poster"
+                src="./assets/images/Meshy_AI_helixos-lab-automation-hero-v3.png"
+                alt="HelixOS platform hero render"
                 loading="eager"
               />
             </figure>
             <p class="model-caption">
-              3D concept stage: experiment lifecycle, sequence pipeline, and regulated audit flow.
+              Real asset pass: the hero render now uses the uploaded 3D scene and fallback image.
             </p>
           </div>
         </div>
       </section>
 
       <section class="band" id="product">
-        <h2>From fragmented lab tools to a single operating layer.</h2>
+        <h2>From disconnected robots to one operating system.</h2>
         <p class="band-lede">
-          HelixOS merges workspace collaboration, ELN structure, molecular analysis surfaces, local AI connectors, and auditability into one system that scientists can run in browser development mode or desktop-local mode.
+          HelixOS brings robot fleets, ELN structure, protocol logic, AI decision support, and compliance logging into one control plane for the modern lab.
         </p>
       </section>
 
-      <section class="split">
-        <article>
-          <h3>Scientific workspace graph</h3>
-          <p>Channel-style workspaces isolate programs and teams while preserving shared operating context.</p>
+      <section class="story-grid" id="story">
+        <article class="story-row">
+          <div class="story-copy">
+            <p class="eyebrow">Robot fleet control</p>
+            <h3>One surface for instruments, queues, and execution.</h3>
+            <p>HelixOS turns separate robots into one operating system, so task routing, handoffs, and live status stay synchronized.</p>
+            <p>The result is a control plane that can run parallel work without losing the state of the lab.</p>
+          </div>
+          <figure class="story-media">
+            <img
+              src="./assets/images/plate_master_robot.png"
+              alt="Lab robot hardware in the HelixOS fleet story"
+              loading="lazy"
+            />
+          </figure>
         </article>
-        <article>
-          <h3>Versioned ELN + protocols</h3>
-          <p>Projects, experiments, samples, and reusable protocols are modeled as typed contracts with version history.</p>
-        </article>
-        <article>
-          <h3>Desktop-local compute loop</h3>
-          <p>Electron + FastAPI sidecar + MCP bridge keeps sensitive connectors close to instrument and bench workflows.</p>
-        </article>
-        <article>
-          <h3>Audit-by-default architecture</h3>
-          <p>Hash-chained audit events are native to the platform, supporting compliance-forward operational design.</p>
-        </article>
-      </section>
 
-      <section class="band usage" id="how-to-use">
-        <h2>How to use HelixOS</h2>
-        <p class="band-lede">
-          Start with the public site, then choose the path that fits your team: explore the source, download the desktop app, or contact us for a pilot.
-        </p>
-        <div class="start-grid">
-          <div class="start-block">
-            <h3>1. Explore the platform</h3>
-            <p>Read the product, traction, and investor sections to see the current scope and operating thesis.</p>
+        <article class="story-row reverse">
+          <div class="story-copy">
+            <p class="eyebrow">Protocol intelligence</p>
+            <h3>Turn methods into executable workflows.</h3>
+            <p>Define approvals, sequencing, and retries once, then let HelixOS coordinate the work between humans, robots, and analysis systems.</p>
+            <p>That gives the lab a repeatable protocol layer instead of a collection of disconnected checklists.</p>
           </div>
-          <div class="start-block">
-            <h3>2. Try the app</h3>
-            <p>Use the latest GitHub release for desktop evaluation, or build from source if you want to inspect the codebase.</p>
+          <figure class="story-media">
+            <img
+              src="./assets/images/programmable_bio_hero.png"
+              alt="Protocol and analysis workflow visual for HelixOS"
+              loading="lazy"
+            />
+          </figure>
+        </article>
+
+        <article class="story-row">
+          <div class="story-copy">
+            <p class="eyebrow">Audit and traceability</p>
+            <h3>Keep a reviewable record for every run.</h3>
+            <p>Every robot action, protocol change, and result lands in a structured system of record for troubleshooting and compliance.</p>
+            <p>That makes HelixOS the software layer investors can trust and operators can actually ship on.</p>
           </div>
-          <div class="start-block">
-            <h3>3. Switch themes if you want</h3>
-            <p>Light pastel is the default. Use the theme button in the header to toggle dark mode for comparison.</p>
-          </div>
-          <div class="start-block">
-            <h3>4. Reach out</h3>
-            <p>Request the deck or start a conversation if you are interested in a pilot, partnership, or investment discussion.</p>
-          </div>
-        </div>
+          <figure class="story-media">
+            <img
+              src="./assets/images/Meshy_AI_helixos-lab-concept.png"
+              alt="HelixOS audit and orchestration concept visual"
+              loading="lazy"
+            />
+          </figure>
+        </article>
       </section>
 
       <section class="band traction" id="traction">
-        <h2>Current traction signals</h2>
+        <h2>Why this matters now</h2>
         <p class="band-lede">
-          The platform is in active MVP execution with working browser and desktop stacks, release automation, and domain-level API surfaces.
+          Labs are buying robots, but they still need the software layer that turns hardware into an operating system.
         </p>
         <div class="metrics-grid">
           <article class="metric">
-            <h3>6 active backend domains</h3>
-            <p>Auth, ELN, Molecular, AI, MCP, and Audit are implemented in the current API runtime.</p>
+            <h3>Robot fleets need orchestration</h3>
+            <p>One vendor per instrument does not scale when the lab wants coordinated, multi-step execution.</p>
           </article>
           <article class="metric">
-            <h3>Dual runtime mode</h3>
-            <p>Browser development mode and desktop sidecar mode run end-to-end from a shared web workspace.</p>
+            <h3>Protocols need state</h3>
+            <p>Manual checklists break down once experiments span robots, humans, and asynchronous analysis.</p>
           </article>
           <article class="metric">
-            <h3>Release-ready desktop pipeline</h3>
-            <p>Tagged desktop builds publish a macOS DMG, establishing a direct distribution channel.</p>
+            <h3>Audit needs to be native</h3>
+            <p>Regulated science requires a system that records every action without extra admin work.</p>
           </article>
         </div>
       </section>
@@ -170,20 +183,20 @@
       <section class="band investors" id="investors">
         <h2>Investor thesis</h2>
         <p class="band-lede">
-          We believe modern biology teams need one AI-native operating system that joins experimental record, molecular iteration, automation, and governance.
+          We believe the winning lab software company is the control plane for robotics, protocol execution, and scientific reasoning.
         </p>
         <div class="start-grid">
           <div class="start-block">
             <h3>Why now</h3>
-            <p>Scientific software stacks remain fragmented while labs move toward AI-guided workflows and stricter traceability demands.</p>
+            <p>Labs are installing automation faster than they are unifying it. The missing layer is software that can run the fleet.</p>
             <a class="btn primary small" href="https://github.com/musicofthings/helixos/discussions/new?category=general">
               Contact founders
             </a>
           </div>
           <div class="start-block">
             <h3>What we are raising for</h3>
-            <p>Accelerate protocol intelligence, production auth/compliance readiness, and pilot rollouts with partner labs.</p>
-            <p class="hint">Request: strategic seed investors aligned with biotech infrastructure and regulated AI software.</p>
+            <p>Build the robotics control layer, ship pilot workflows, and prove that HelixOS can operate real lab fleets end-to-end.</p>
+            <p class="hint">Request: strategic seed investors aligned with biotech infrastructure, robotics, and regulated software.</p>
           </div>
         </div>
       </section>
