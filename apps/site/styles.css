@@ -461,6 +461,88 @@ a {
   padding-bottom: 3rem;
 }
 
+.contact {
+  padding-bottom: 3.5rem;
+}
+
+.contact-form {
+  margin-top: 1.75rem;
+  display: grid;
+  gap: 1rem;
+  max-width: 720px;
+}
+
+.form-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+.contact-form label {
+  display: grid;
+  gap: 0.4rem;
+  font-size: 0.88rem;
+  color: var(--mist);
+}
+
+.contact-form label.full {
+  grid-column: 1 / -1;
+}
+
+.contact-form input,
+.contact-form select,
+.contact-form textarea {
+  padding: 0.7rem 0.85rem;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--foam);
+  font-family: var(--font-body);
+  font-size: 0.95rem;
+  resize: vertical;
+}
+
+.contact-form input:focus,
+.contact-form select:focus,
+.contact-form textarea:focus {
+  outline: none;
+  border-color: var(--acid-deep);
+}
+
+.hp-field {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.form-actions {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.form-status {
+  margin: 0;
+  font-size: 0.88rem;
+  color: var(--mist);
+}
+
+.form-status[data-state="success"] {
+  color: var(--acid-deep);
+}
+
+.form-status[data-state="error"] {
+  color: var(--amber);
+}
+
+.form-status a {
+  color: inherit;
+  text-decoration: underline;
+}
+
 .foot {
   max-width: 1120px;
   margin: 0 auto;
@@ -517,7 +599,8 @@ a {
   .split,
   .start-grid,
   .metrics-grid,
-  .story-row {
+  .story-row,
+  .form-row {
     grid-template-columns: 1fr;
   }
 

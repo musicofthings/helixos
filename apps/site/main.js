@@ -57,3 +57,52 @@ const observer = new IntersectionObserver(
 for (const el of revealTargets) {
   observer.observe(el);
 }
+
+const reasonSelect = document.querySelector("[data-contact-reason-select]");
+const reasonTriggers = document.querySelectorAll("[data-contact-reason]");
+
+for (const trigger of reasonTriggers) {
+  trigger.addEventListener("click", () => {
+    if (reasonSelect) {
+      reasonSelect.value = trigger.dataset.contactReason;
+    }
+  });
+}
+
+const contactForm = document.querySelector("[data-contact-form]");
+const formStatus = document.querySelector("[data-form-status]");
+
+if (contactForm && formStatus) {
+  contactForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+
+    const submitButton = contactForm.querySelector("button[type='submit']");
+    const formData = new FormData(contactForm);
+
+    submitButton.disabled = true;
+    formStatus.textContent = "Sending…";
+    formStatus.dataset.state = "pending";
+
+    try {
+      const response = await fetch(contactForm.action, {
+        method: "POST",
+        body: formData,
+        headers: { Accept: "application/json" },
+      });
+
+      if (response.ok) {
+        formStatus.textContent = "Thanks — we'll be in touch shortly.";
+        formStatus.dataset.state = "success";
+        contactForm.reset();
+      } else {
+        throw new Error("Form submission failed");
+      }
+    } catch (error) {
+      formStatus.innerHTML =
+        'Something went wrong. Please <a href="https://github.com/musicofthings/helixos/discussions/new?category=general">reach out via GitHub Discussions</a> instead.';
+      formStatus.dataset.state = "error";
+    } finally {
+      submitButton.disabled = false;
+    }
+  });
+}

@@ -39,6 +39,7 @@
           <a href="#story">Story</a>
           <a href="#traction">Traction</a>
           <a href="#investors">Investors</a>
+          <a href="#contact">Contact</a>
           <a href="https://github.com/musicofthings/helixos">GitHub</a>
         </nav>
         <button
@@ -70,7 +71,8 @@
         <div class="cta">
           <a
             class="btn primary"
-            href="https://github.com/musicofthings/helixos/discussions/new?category=general"
+            href="#contact"
+            data-contact-reason="Investor deck"
           >
             Request investor deck
           </a>
@@ -165,7 +167,11 @@
           <div class="start-block">
             <h3>Why now</h3>
             <p>Labs are installing automation faster than they are unifying it. The missing layer is software that can run the fleet.</p>
-            <a class="btn primary small" href="https://github.com/musicofthings/helixos/discussions/new?category=general">
+            <a
+              class="btn primary small"
+              href="#contact"
+              data-contact-reason="Investor deck"
+            >
               Contact founders
             </a>
           </div>
@@ -208,13 +214,69 @@ npm run dev:browser</code></pre>
         </p>
         <a class="btn ghost" href="https://github.com/musicofthings/helixos#readme">Open README on GitHub</a>
       </section>
+
+      <section class="band contact" id="contact">
+        <h2>Talk to the team</h2>
+        <p class="band-lede">
+          Request the investor deck, ask about pilots, or reach out for press and partnerships. We reply within one business day.
+        </p>
+        <form
+          class="contact-form"
+          data-contact-form
+          action="https://formspree.io/f/YOUR_FORM_ID"
+          method="POST"
+        >
+          <div class="form-row">
+            <label>
+              <span>Name</span>
+              <input type="text" name="name" autocomplete="name" required />
+            </label>
+            <label>
+              <span>Email</span>
+              <input type="email" name="email" autocomplete="email" required />
+            </label>
+          </div>
+          <div class="form-row">
+            <label>
+              <span>Company</span>
+              <input type="text" name="company" autocomplete="organization" />
+            </label>
+            <label>
+              <span>I'm reaching out about</span>
+              <select name="reason" data-contact-reason-select>
+                <option value="Investor deck">Investor deck</option>
+                <option value="Pilot / partnership">Pilot / partnership</option>
+                <option value="Press">Press</option>
+                <option value="General">General</option>
+              </select>
+            </label>
+          </div>
+          <label class="full">
+            <span>Message</span>
+            <textarea name="message" rows="4" required></textarea>
+          </label>
+          <input
+            type="text"
+            name="_gotcha"
+            class="hp-field"
+            tabindex="-1"
+            autocomplete="off"
+            aria-hidden="true"
+          />
+          <input type="hidden" name="_subject" value="HelixOS investor site inquiry" />
+          <div class="form-actions">
+            <button type="submit" class="btn primary">Send message</button>
+            <p class="form-status" data-form-status role="status" aria-live="polite"></p>
+          </div>
+        </form>
+      </section>
     </main>
 
     <footer class="foot">
       <span>HelixOS · Investor Preview</span>
       <a href="https://github.com/musicofthings/helixos">Source</a>
       <a href="https://github.com/musicofthings/helixos/releases/latest">Releases</a>
-      <a href="https://github.com/musicofthings/helixos/discussions/new?category=general">Contact</a>
+      <a href="#contact">Contact</a>
     </footer>
 
     <script type="module" src="./main.js"></script>
