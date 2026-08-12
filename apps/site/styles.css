@@ -509,6 +509,17 @@ a {
   border-color: var(--acid-deep);
 }
 
+.contact-form input[aria-invalid="true"],
+.contact-form textarea[aria-invalid="true"] {
+  border-color: var(--amber);
+}
+
+.field-error {
+  min-height: 1.1em;
+  font-size: 0.8rem;
+  color: var(--amber);
+}
+
 .hp-field {
   position: absolute;
   width: 1px;

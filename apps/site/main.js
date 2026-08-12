@@ -72,6 +72,36 @@ for (const trigger of reasonTriggers) {
 const contactForm = document.querySelector("[data-contact-form]");
 const formStatus = document.querySelector("[data-form-status]");
 
+const clearFieldErrors = () => {
+  const errorEls = contactForm.querySelectorAll("[data-fs-error]");
+  for (const el of errorEls) {
+    el.textContent = "";
+  }
+  const fields = contactForm.querySelectorAll("[data-fs-field]");
+  for (const field of fields) {
+    field.removeAttribute("aria-invalid");
+  }
+};
+
+const showFieldErrors = (errors) => {
+  let matchedAny = false;
+  for (const err of errors) {
+    const field = err.field;
+    const message = err.message || "This field has an error.";
+    if (!field) continue;
+    const errorEl = contactForm.querySelector(`[data-fs-error="${field}"]`);
+    const fieldEl = contactForm.querySelector(`[data-fs-field="${field}"]`);
+    if (errorEl) {
+      errorEl.textContent = message;
+      matchedAny = true;
+    }
+    if (fieldEl) {
+      fieldEl.setAttribute("aria-invalid", "true");
+    }
+  }
+  return matchedAny;
+};
+
 if (contactForm && formStatus) {
   contactForm.addEventListener("submit", async (event) => {
     event.preventDefault();
@@ -82,6 +112,7 @@ if (contactForm && formStatus) {
     submitButton.disabled = true;
     formStatus.textContent = "Sending…";
     formStatus.dataset.state = "pending";
+    clearFieldErrors();
 
     try {
       const response = await fetch(contactForm.action, {
@@ -90,10 +121,18 @@ if (contactForm && formStatus) {
         headers: { Accept: "application/json" },
       });
 
-      if (response.ok) {
+      const payload = await response.json().catch(() => null);
+
+      if (response.ok && payload?.ok !== false) {
         formStatus.textContent = "Thanks — we'll be in touch shortly.";
         formStatus.dataset.state = "success";
         contactForm.reset();
+      } else if (payload?.errors?.length) {
+        const shownInline = showFieldErrors(payload.errors);
+        formStatus.textContent = shownInline
+          ? "Please fix the highlighted fields and try again."
+          : payload.errors.map((err) => err.message).join(" ");
+        formStatus.dataset.state = "error";
       } else {
         throw new Error("Form submission failed");
       }

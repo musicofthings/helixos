@@ -223,23 +223,26 @@ npm run dev:browser</code></pre>
         <form
           class="contact-form"
           data-contact-form
-          action="https://formspree.io/f/YOUR_FORM_ID"
+          action="https://formspree.io/f/xkjwbjad"
           method="POST"
         >
           <div class="form-row">
             <label>
               <span>Name</span>
-              <input type="text" name="name" autocomplete="name" required />
+              <input type="text" name="name" autocomplete="name" required data-fs-field="name" />
+              <span class="field-error" data-fs-error="name"></span>
             </label>
             <label>
               <span>Email</span>
-              <input type="email" name="email" autocomplete="email" required />
+              <input type="email" name="email" autocomplete="email" required data-fs-field="email" />
+              <span class="field-error" data-fs-error="email"></span>
             </label>
           </div>
           <div class="form-row">
             <label>
               <span>Company</span>
-              <input type="text" name="company" autocomplete="organization" />
+              <input type="text" name="company" autocomplete="organization" data-fs-field="company" />
+              <span class="field-error" data-fs-error="company"></span>
             </label>
             <label>
               <span>I'm reaching out about</span>
@@ -253,7 +256,8 @@ npm run dev:browser</code></pre>
           </div>
           <label class="full">
             <span>Message</span>
-            <textarea name="message" rows="4" required></textarea>
+            <textarea name="message" rows="4" required data-fs-field="message"></textarea>
+            <span class="field-error" data-fs-error="message"></span>
           </label>
           <input
             type="text"
