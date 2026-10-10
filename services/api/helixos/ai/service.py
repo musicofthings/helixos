@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
+from collections import OrderedDict
 from collections.abc import AsyncIterator
 from datetime import datetime, timezone
 from pathlib import Path
@@ -17,6 +19,10 @@ from helixos.auth.service import organization_service
 from helixos.eln.service import experiment_service
 from helixos.errors import api_error
 
+# In-memory retention caps: oldest sessions/runs are evicted first.
+MAX_RETAINED_SESSIONS = 1_000
+MAX_RETAINED_RUNS = 5_000
+
 PROMPT_PATH = Path(__file__).resolve().parents[4] / "prompts" / "eln_copilot.md"
 
 
@@ -24,14 +30,20 @@ class AgentService:
     """Coordinates agent sessions and streaming runs."""
 
     def __init__(self) -> None:
-        self._sessions: dict[str, AgentSessionRecord] = {}
-        self._runs: dict[str, AgentRunRecord] = {}
+        self._sessions: OrderedDict[str, AgentSessionRecord] = OrderedDict()
+        self._runs: OrderedDict[str, AgentRunRecord] = OrderedDict()
+
+    @staticmethod
+    def _evict(store: OrderedDict, limit: int) -> None:
+        while len(store) > limit:
+            store.popitem(last=False)
 
     def create_session(self, organization_id: str, actor: Actor) -> AgentSessionRecord:
         """Create an agent session scoped to a tenant."""
         organization_service.require_access(actor, organization_id)
         session = AgentSessionRecord.create(organization_id)
         self._sessions[session.id] = session
+        self._evict(self._sessions, MAX_RETAINED_SESSIONS)
         # Sync method behind a sync endpoint — FastAPI already runs it in a
         # threadpool, so the blocking audit write never touches the event loop.
         audit_service.record(
@@ -74,6 +86,7 @@ class AgentService:
 
         run = AgentRunRecord.create(session_id, message)
         self._runs[run.id] = run
+        self._evict(self._runs, MAX_RETAINED_RUNS)
         run.status = AgentRunStatus.RUNNING
         await run_in_threadpool(
             audit_service.record,
@@ -103,6 +116,8 @@ class AgentService:
                 yield frame
             run.status = AgentRunStatus.COMPLETED
             run.completed_at = datetime.now(timezone.utc)
+            # Audit before announcing completion so a client that sees `done`
+            # can rely on the completion event being durable.
             await run_in_threadpool(
                 audit_service.record,
                 organization_id=session.organization_id,
@@ -110,8 +125,18 @@ class AgentService:
                 event_type="ai.run_completed",
                 resource_type="agent_run",
                 resource_id=run.id,
-                payload={"session_id": session_id, "event_count": len(run.events)},
+                payload={
+                    "session_id": session_id,
+                    "event_count": len(run.events),
+                    "token_count": run.token_count,
+                },
             )
+        except (asyncio.CancelledError, GeneratorExit):
+            # Client disconnected mid-stream: don't leave the run RUNNING.
+            run.status = AgentRunStatus.CANCELLED
+            run.completed_at = datetime.now(timezone.utc)
+            self._record_cancellation_best_effort(session.organization_id, actor, run)
+            raise
         except Exception as exc:  # noqa: BLE001 - surface agent failures as SSE errors
             run.status = AgentRunStatus.FAILED
             run.error = str(exc)
@@ -126,6 +151,33 @@ class AgentService:
             )
             yield self._sse("error", {"message": str(exc), "run_id": run.id})
             yield self._sse("done", {"run_id": run.id, "status": run.status})
+            return
+
+        done_payload = {
+            "run_id": run.id,
+            "status": AgentRunStatus.COMPLETED,
+            "provider": run.provider,
+        }
+        run.events.append({"event": "done", "data": done_payload})
+        yield self._sse("done", done_payload)
+
+    @staticmethod
+    def _record_cancellation_best_effort(
+        organization_id: str, actor: Actor, run: AgentRunRecord
+    ) -> None:
+        # Synchronous on purpose: this runs while the task is being cancelled,
+        # when awaiting would be interrupted again.
+        try:
+            audit_service.record(
+                organization_id=organization_id,
+                actor=actor,
+                event_type="ai.run_cancelled",
+                resource_type="agent_run",
+                resource_id=run.id,
+                payload={"session_id": run.session_id, "token_count": run.token_count},
+            )
+        except Exception:  # noqa: BLE001 - never mask the cancellation itself
+            pass
 
     async def _execute_run(
         self,
@@ -183,18 +235,11 @@ class AgentService:
             tool_summaries=[f"{len(visible)} visible experiment record(s)"],
         )
 
+        run.provider = provider.name
         async for token in provider.stream_response(prompt_context):
-            token_payload = {"content": token, "run_id": run.id}
-            run.events.append({"event": "token", "data": token_payload})
-            yield self._sse("token", token_payload)
-
-        done_payload = {
-            "run_id": run.id,
-            "status": AgentRunStatus.COMPLETED,
-            "provider": provider.name,
-        }
-        run.events.append({"event": "done", "data": done_payload})
-        yield self._sse("done", done_payload)
+            # Count tokens rather than retaining each one for the life of the process.
+            run.token_count += 1
+            yield self._sse("token", {"content": token, "run_id": run.id})
 
     async def _record_tool_call(
         self,

@@ -13,6 +13,7 @@ class AgentRunStatus(StrEnum):
     RUNNING = "running"
     COMPLETED = "completed"
     FAILED = "failed"
+    CANCELLED = "cancelled"
 
 
 @dataclass
@@ -47,6 +48,8 @@ class AgentRunRecord:
     completed_at: datetime | None = None
     error: str | None = None
     events: list[dict[str, object]] = field(default_factory=list)
+    token_count: int = 0
+    provider: str | None = None
 
     @classmethod
     def create(cls, session_id: str, message: str) -> "AgentRunRecord":

@@ -177,3 +177,12 @@ def test_concurrent_creates_all_commit_with_audit_events(sqlite_client) -> None:
     )
     if verification.status_code == 200:
         assert verification.json()["valid"] is True
+
+
+def test_sqlite_enforces_foreign_keys(sqlite_client) -> None:
+    from sqlalchemy import text
+
+    from helixos.db.session import session_scope
+
+    with session_scope() as session:
+        assert session.execute(text("PRAGMA foreign_keys")).scalar() == 1

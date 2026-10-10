@@ -7,7 +7,7 @@ import random
 import time
 from typing import TypeVar
 
-from sqlalchemy import create_engine, inspect, text
+from sqlalchemy import create_engine, event, inspect, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import Session, sessionmaker
@@ -36,6 +36,14 @@ def get_engine(settings: DatabaseSettings | None = None) -> Engine | None:
             # failing immediately when concurrent requests append audit rows.
             connect_args = {"check_same_thread": False, "timeout": 30}
         _engine = create_engine(resolved.url, future=True, connect_args=connect_args)
+        if resolved.url.startswith("sqlite"):
+            # SQLite ignores FOREIGN KEY constraints unless enabled per connection.
+            @event.listens_for(_engine, "connect")
+            def _enable_sqlite_foreign_keys(dbapi_connection, _record) -> None:
+                cursor = dbapi_connection.cursor()
+                cursor.execute("PRAGMA foreign_keys=ON")
+                cursor.close()
+
         _session_factory = sessionmaker(
             bind=_engine, autoflush=False, autocommit=False, future=True
         )
