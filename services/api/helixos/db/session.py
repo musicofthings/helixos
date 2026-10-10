@@ -7,19 +7,18 @@ import random
 import time
 from typing import TypeVar
 
-from sqlalchemy import create_engine, event, inspect, text
+from sqlalchemy import create_engine, event
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import Session, sessionmaker
-from sqlalchemy.schema import Table
 
-from helixos.db.base import Base
 from helixos.db.settings import DatabaseSettings, get_database_settings
 
 T = TypeVar("T")
 
 _engine: Engine | None = None
 _session_factory: sessionmaker[Session] | None = None
+_migrated_engine: Engine | None = None
 
 
 def get_engine(settings: DatabaseSettings | None = None) -> Engine | None:
@@ -52,49 +51,24 @@ def get_engine(settings: DatabaseSettings | None = None) -> Engine | None:
 
 def reset_engine() -> None:
     """Reset cached SQLAlchemy engine (used in tests)."""
-    global _engine, _session_factory
+    global _engine, _session_factory, _migrated_engine
     if _engine is not None:
         _engine.dispose()
     _engine = None
     _session_factory = None
+    _migrated_engine = None
 
 
 def init_db(settings: DatabaseSettings | None = None) -> None:
-    """Create database tables when using SQL storage."""
-    from helixos.audit.orm import AuditEventORM  # noqa: F401
-    from helixos.eln import orm as eln_orm  # noqa: F401
+    """Bring the database schema up to date (idempotent; runs once per engine)."""
+    global _migrated_engine
+    from helixos.db.migrations import upgrade
 
     engine = get_engine(settings)
-    if engine is not None:
-        Base.metadata.create_all(engine)
-        _apply_additive_migrations(engine)
-
-
-def _apply_additive_migrations(engine: Engine) -> None:
-    """Add newly-declared nullable columns to already-created tables.
-
-    ``create_all`` only creates missing tables; it never alters existing ones.
-    This project has no migration framework, so for backward-compatible additions
-    (nullable columns) we detect and add them explicitly here. Non-nullable
-    additions are skipped — those need a real migration to backfill existing rows.
-    """
-    inspector = inspect(engine)
-    existing_tables = set(inspector.get_table_names())
-    for table in Base.metadata.tables.values():
-        if not isinstance(table, Table) or table.name not in existing_tables:
-            continue
-        present = {col["name"] for col in inspector.get_columns(table.name)}
-        for column in table.columns:
-            if column.name in present or not column.nullable:
-                continue
-            column_type = column.type.compile(dialect=engine.dialect)
-            with engine.begin() as connection:
-                connection.execute(
-                    text(
-                        f'ALTER TABLE "{table.name}" '
-                        f'ADD COLUMN "{column.name}" {column_type}'
-                    )
-                )
+    if engine is None or _migrated_engine is engine:
+        return
+    upgrade(engine)
+    _migrated_engine = engine
 
 
 # Ambient session shared by every store call made inside ``unit_of_work``.

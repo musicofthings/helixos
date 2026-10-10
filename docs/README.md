@@ -74,3 +74,15 @@ npm run dev:browser    # API :8000 + web :3000
 npm run dev:desktop    # Electron + sidecar :8765 + MCP :8766 + web :3000
 npm run test:api       # backend pytest suite
 ```
+
+## Database migrations
+
+SQL-backed deployments (SQLite, PostgreSQL) are versioned by `services/api/helixos/db/migrations.py`. The API applies pending migrations at startup (`init_db`), once per process; applied versions live in `helix_schema_migrations`.
+
+```bash
+cd services/api
+HELIX_DATABASE_URL=... python -m helixos.db.migrations status
+HELIX_DATABASE_URL=... python -m helixos.db.migrations upgrade
+```
+
+To change the schema, append a `(version, fn)` entry to `MIGRATIONS` (never edit an applied one) and use `op.batch_alter_table` for anything SQLite cannot `ALTER`. `0001_baseline` creates tables from the current ORM models, so later migrations must be idempotent (`column_exists` / `index_exists`). Databases created before versioning are adopted by the baseline automatically.

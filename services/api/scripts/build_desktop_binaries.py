@@ -26,6 +26,7 @@ def build_api_binary(api_root: Path, dist_dir: Path) -> Path:
             "--onefile",
             f"--name={name}",
             "--collect-submodules=helixos",
+            "--collect-submodules=alembic",
             "--hidden-import=uvicorn.logging",
             "--hidden-import=uvicorn.loops",
             "--hidden-import=uvicorn.loops.auto",
