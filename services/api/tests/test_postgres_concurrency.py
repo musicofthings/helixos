@@ -8,7 +8,6 @@ barrier so the racing transactions genuinely overlap.
 import threading
 from concurrent.futures import ThreadPoolExecutor
 
-import pytest
 from sqlalchemy import create_engine, func, inspect, select
 
 from helixos.db import migrations

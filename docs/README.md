@@ -102,3 +102,20 @@ The API logs one JSON object per line to stderr (`HELIX_LOG_FORMAT=text` for rea
 Request IDs are not written into audit events (they would change hash-chained payloads); correlate through `resource_id` and timestamps.
 
 The web client surfaces the request ID: `HelixOSApiError.requestId` (from `error.request_id`, falling back to the `X-Request-ID` header), and user-facing failure messages render as `message (ref req_…)` via `apps/web/lib/error-message.ts`. Agent-run `error` SSE frames also carry `request_id`.
+
+
+## Smoke tests and agent evals
+
+`services/api/evals/run.py` boots a throwaway API (fresh SQLite database, so migrations run from scratch) and drives it over HTTP.
+
+```bash
+cd services/api
+python evals/run.py                        # everything
+python evals/run.py --suite smoke          # or: --suite agent
+python evals/run.py --base-url http://127.0.0.1:8000 --json report.json   # existing API (writes data)
+```
+
+- **Smoke:** health, migrations and list indexes, request IDs and the error envelope, CORS, the full workspace → dataset hierarchy, version locking, pagination, share/invite access (including cross-org editors being audited), audit hash chains, the MCP connector over stdio, and log correlation.
+- **Agent evals:** properties of the system around the model, so they are meaningful for any provider: stream protocol order, grounding of tool results in what the API shows, tenant isolation (including a multi-org user in a single-org session), prompt-injection attempts, audit trail completeness, authorization before streaming, odd input, 10 parallel runs, and a latency budget. Checks that depend on the stub's deterministic text are skipped for other providers.
+
+CI runs the suite in the `api` job and uploads the JSON report.

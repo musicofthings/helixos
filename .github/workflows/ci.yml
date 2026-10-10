@@ -29,6 +29,16 @@ jobs:
       - name: Test (memory + SQLite stores)
         working-directory: services/api
         run: python -m pytest tests/ -v
+      - name: Smoke tests and agent evals (live API, fresh SQLite)
+        working-directory: services/api
+        run: python evals/run.py --json evals-report.json
+      - name: Upload eval report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-report
+          path: services/api/evals-report.json
+          if-no-files-found: ignore
 
   api-postgres:
     runs-on: ubuntu-latest

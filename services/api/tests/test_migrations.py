@@ -1,6 +1,5 @@
 """Versioned migration runner."""
 
-import sqlite3
 
 import pytest
 from sqlalchemy import create_engine, inspect, text
