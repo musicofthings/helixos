@@ -60,6 +60,7 @@ jobs:
           # Unsigned local/CI builds are expected until Apple signing secrets exist.
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
           HELIX_DISABLE_AUTOUPDATE: "1"
+          HELIX_REQUIRE_RUNTIME: "1"
         run: npm run dist
 
       - name: Stage release assets
