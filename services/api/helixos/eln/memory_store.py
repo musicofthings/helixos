@@ -19,6 +19,8 @@ from helixos.eln.schemas import (
     WorkspaceShare,
 )
 from helixos.eln.stores import (
+    PageRequest,
+    PageResult,
     InviteUnavailableError,
     PlateFullError,
     StaleStateError,
@@ -28,6 +30,19 @@ from helixos.eln.stores import (
 
 def _now() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def _slice(items: list, key, page: PageRequest | None) -> PageResult:
+    ordered = sorted(items, key=key)
+    if page is None:
+        return PageResult(items=ordered, total=len(ordered))
+    return PageResult(
+        items=ordered[page.offset : page.offset + page.limit], total=len(ordered)
+    )
+
+
+def _by_created(item) -> tuple:
+    return (item.created_at, item.id)
 
 
 class MemoryElnStore:
@@ -63,6 +78,16 @@ class MemoryElnStore:
         return sum(
             1 for w in self._workspaces.values() if w.organization_id == organization_id
         )
+
+    def page_workspaces(self, organization_ids, shared_workspace_ids, page=None):
+        orgs, shared = set(organization_ids), set(shared_workspace_ids)
+        with self._lock:
+            items = [
+                w
+                for w in self._workspaces.values()
+                if w.organization_id in orgs or w.id in shared
+            ]
+        return _slice(items, _by_created, page)
 
     def delete_workspace(self, workspace_id: str) -> None:
         with self._lock:
@@ -178,6 +203,24 @@ class MemoryElnStore:
         ]
         return sorted(items, key=lambda p: p.created_at)
 
+    def page_projects(
+        self, organization_ids, shared_workspace_ids=(), workspace_id=None, page=None
+    ):
+        orgs, shared = set(organization_ids), set(shared_workspace_ids)
+        with self._lock:
+            items = [
+                p
+                for p in self._projects.values()
+                if (p.organization_id in orgs or p.workspace_id in shared)
+                and (workspace_id is None or p.workspace_id == workspace_id)
+            ]
+        return _slice(items, _by_created, page)
+
+    def project_ids_in_workspaces(self, workspace_ids):
+        wanted = set(workspace_ids)
+        with self._lock:
+            return [p.id for p in self._projects.values() if p.workspace_id in wanted]
+
     def update_project(self, project: Project) -> Project:
         with self._lock:
             self._projects[project.id] = project
@@ -209,6 +252,19 @@ class MemoryElnStore:
                 and (workspace_id is None or p.workspace_id == workspace_id)
             ]
         return sorted(items, key=lambda p: p.created_at)
+
+    def page_protocols(
+        self, organization_ids, shared_workspace_ids=(), workspace_id=None, page=None
+    ):
+        orgs, shared = set(organization_ids), set(shared_workspace_ids)
+        with self._lock:
+            items = [
+                p
+                for p in self._protocols.values()
+                if (p.organization_id in orgs or p.workspace_id in shared)
+                and (workspace_id is None or p.workspace_id == workspace_id)
+            ]
+        return _slice(items, _by_created, page)
 
     def update_protocol(self, protocol: Protocol) -> Protocol:
         with self._lock:
@@ -244,6 +300,19 @@ class MemoryElnStore:
             and (project_id is None or e.project_id == project_id)
         ]
         return sorted(items, key=lambda e: e.created_at)
+
+    def page_experiments(
+        self, organization_ids, shared_project_ids=(), project_id=None, page=None
+    ):
+        orgs, shared = set(organization_ids), set(shared_project_ids)
+        with self._lock:
+            items = [
+                e
+                for e in self._experiments.values()
+                if (e.organization_id in orgs or e.project_id in shared)
+                and (project_id is None or e.project_id == project_id)
+            ]
+        return _slice(items, _by_created, page)
 
     def update_experiment(self, experiment: Experiment) -> Experiment:
         with self._lock:
@@ -321,6 +390,11 @@ class MemoryElnStore:
         items = [v for v in self._versions.values() if v.experiment_id == experiment_id]
         return sorted(items, key=lambda v: v.version_number)
 
+    def page_versions(self, experiment_id, page=None):
+        with self._lock:
+            items = [v for v in self._versions.values() if v.experiment_id == experiment_id]
+        return _slice(items, lambda v: v.version_number, page)
+
     def update_version(
         self, version: ExperimentVersion, expected_status: ExperimentStatus
     ) -> ExperimentVersion:
@@ -356,6 +430,11 @@ class MemoryElnStore:
     def list_samples(self, experiment_id: str) -> list[Sample]:
         items = [s for s in self._samples.values() if s.experiment_id == experiment_id]
         return sorted(items, key=lambda s: s.created_at)
+
+    def page_samples(self, experiment_id, page=None):
+        with self._lock:
+            items = [s for s in self._samples.values() if s.experiment_id == experiment_id]
+        return _slice(items, _by_created, page)
 
     def count_samples(self, experiment_id: str) -> int:
         return sum(
@@ -402,3 +481,8 @@ class MemoryElnStore:
     def list_datasets(self, sample_id: str) -> list[Dataset]:
         items = [d for d in self._datasets.values() if d.sample_id == sample_id]
         return sorted(items, key=lambda d: d.created_at)
+
+    def page_datasets(self, sample_id, page=None):
+        with self._lock:
+            items = [d for d in self._datasets.values() if d.sample_id == sample_id]
+        return _slice(items, _by_created, page)

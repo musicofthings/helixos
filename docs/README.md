@@ -91,7 +91,9 @@ To change the schema, append a `(version, fn)` entry to `MIGRATIONS` (never edit
 
 ELN list endpoints (`workspaces`, `projects`, `protocols`, `experiments`, experiment `versions`, `samples`, sample `datasets`) accept `limit` (1–500, default 100) and `offset` (default 0). Responses remain plain JSON arrays; page metadata is in headers: `X-Total-Count` always, and `X-Next-Offset` while more items remain (CORS exposes both). `@helixos/api-client` list methods follow `X-Next-Offset` automatically (500 per request) and return the full list.
 
-Slicing happens after the service builds the visible list (it merges organization and shared-workspace access), so this bounds response size, not database reads. Pushing limits into the stores is a follow-up.
+The window is applied in the database query: stores expose `page_*` methods that take a `PageRequest` and return a `PageResult` (items plus total), ordered by `(created_at, id)` (versions by `version_number`). Visibility is resolved once in the service — organization members see their orgs, share grantees see only shared workspaces (and the projects/experiments inside them) — and passed to the store as `organization_ids` plus shared workspace/project ids, so one `WHERE org IN (…) OR shared IN (…)` query serves both. Composite indexes matching that `ORDER BY` are created by migration `0002_eln_list_indexes`. The total comes from a `COUNT(*)`, which still scans the matching index range.
+
+Behaviour note: listing an organization you do not belong to returns 403 unless you hold a share in it; a grantee of an empty shared workspace now gets an empty page (previously 403).
 
 ## Logging and request IDs
 

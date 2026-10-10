@@ -13,7 +13,10 @@ class WorkspaceORM(Base):
     """Persisted workspace."""
 
     __tablename__ = "eln_workspaces"
-    __table_args__ = (Index("ix_eln_workspaces_org", "organization_id"),)
+    __table_args__ = (
+        Index("ix_eln_workspaces_org", "organization_id"),
+        Index("ix_eln_list_workspaces", "organization_id", "created_at", "id"),
+    )
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
     organization_id: Mapped[str] = mapped_column(String(64), nullable=False)
@@ -93,6 +96,8 @@ class ProjectORM(Base):
     __table_args__ = (
         Index("ix_eln_projects_org", "organization_id"),
         Index("ix_eln_projects_workspace", "workspace_id"),
+        Index("ix_eln_list_projects_org", "organization_id", "created_at", "id"),
+        Index("ix_eln_list_projects_ws", "workspace_id", "created_at", "id"),
     )
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
@@ -118,6 +123,8 @@ class ProtocolORM(Base):
     __table_args__ = (
         Index("ix_eln_protocols_org", "organization_id"),
         Index("ix_eln_protocols_workspace", "workspace_id"),
+        Index("ix_eln_list_protocols_org", "organization_id", "created_at", "id"),
+        Index("ix_eln_list_protocols_ws", "workspace_id", "created_at", "id"),
     )
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
@@ -147,6 +154,8 @@ class ExperimentORM(Base):
     __table_args__ = (
         Index("ix_eln_experiments_org", "organization_id"),
         Index("ix_eln_experiments_project", "project_id"),
+        Index("ix_eln_list_experiments_org", "organization_id", "created_at", "id"),
+        Index("ix_eln_list_experiments_project", "project_id", "created_at", "id"),
     )
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
@@ -202,6 +211,7 @@ class SampleORM(Base):
             "experiment_id", "well_position", name="uq_eln_sample_experiment_well"
         ),
         Index("ix_eln_samples_experiment", "experiment_id"),
+        Index("ix_eln_list_samples", "experiment_id", "created_at", "id"),
         Index("ix_eln_samples_org", "organization_id"),
     )
 
@@ -231,6 +241,7 @@ class DatasetORM(Base):
     __tablename__ = "eln_datasets"
     __table_args__ = (
         Index("ix_eln_datasets_sample", "sample_id"),
+        Index("ix_eln_list_datasets", "sample_id", "created_at", "id"),
         Index("ix_eln_datasets_org", "organization_id"),
     )
 

@@ -54,6 +54,8 @@ from helixos.eln.schemas import (
 from helixos.db.session import run_atomic
 from helixos.eln.stores import (
     ElnStore,
+    PageRequest,
+    PageResult,
     InviteUnavailableError,
     PlateFullError,
     StaleStateError,
@@ -217,29 +219,51 @@ class ElnService:
         )
         return workspace
 
+    def _shared_workspaces(
+        self, actor: Actor, organization_id: str | None
+    ) -> list[Workspace]:
+        """Workspaces the actor reaches through a share (optionally within one org)."""
+        shared: list[Workspace] = []
+        for share in self._store.list_shares_for_subject(actor.subject):
+            workspace = self._store.get_workspace(share.workspace_id)
+            if workspace is None:
+                continue
+            if organization_id is not None and workspace.organization_id != organization_id:
+                continue
+            shared.append(workspace)
+        return shared
+
+    def _visibility(
+        self, actor: Actor, organization_id: str | None
+    ) -> tuple[list[str], list[str]]:
+        """Resolve what the actor may list: (full-access org ids, shared workspace ids).
+
+        Organization members see everything in their orgs; share grantees see only
+        the shared workspaces. A caller with neither for the requested org is
+        refused (403) rather than shown an empty list.
+        """
+        shared = self._shared_workspaces(actor, organization_id)
+        if organization_id is not None:
+            if organization_id in actor.organization_ids:
+                return [organization_id], [w.id for w in shared]
+            if not shared:
+                organization_service.require_access(actor, organization_id)
+            return [], [w.id for w in shared]
+        return list(actor.organization_ids), [w.id for w in shared]
+
+    def page_workspaces(
+        self,
+        actor: Actor,
+        organization_id: str | None = None,
+        page: PageRequest | None = None,
+    ) -> PageResult[Workspace]:
+        orgs, shared_ids = self._visibility(actor, organization_id)
+        return self._store.page_workspaces(orgs, shared_ids, page)
+
     def list_workspaces(
         self, actor: Actor, organization_id: str | None = None
     ) -> list[Workspace]:
-        by_id: dict[str, Workspace] = {}
-        if organization_id is not None:
-            if organization_id in actor.organization_ids:
-                for workspace in self._store.list_workspaces([organization_id]):
-                    by_id[workspace.id] = workspace
-            for share in self._store.list_shares_for_subject(actor.subject):
-                workspace = self._store.get_workspace(share.workspace_id)
-                if workspace is not None and workspace.organization_id == organization_id:
-                    by_id[workspace.id] = workspace
-            if not by_id and organization_id not in actor.organization_ids:
-                organization_service.require_access(actor, organization_id)
-        else:
-            if actor.organization_ids:
-                for workspace in self._store.list_workspaces(actor.organization_ids):
-                    by_id[workspace.id] = workspace
-            for share in self._store.list_shares_for_subject(actor.subject):
-                workspace = self._store.get_workspace(share.workspace_id)
-                if workspace is not None:
-                    by_id[workspace.id] = workspace
-        return sorted(by_id.values(), key=lambda item: item.created_at)
+        return self.page_workspaces(actor, organization_id).items
 
     def get_workspace(self, workspace_id: str, actor: Actor) -> Workspace:
         return self.require_workspace_role(
@@ -477,48 +501,30 @@ class ElnService:
         )
         return project
 
+    def page_projects(
+        self,
+        actor: Actor,
+        organization_id: str | None = None,
+        workspace_id: str | None = None,
+        page: PageRequest | None = None,
+    ) -> PageResult[Project]:
+        if workspace_id is not None:
+            workspace = self.require_workspace_role(
+                workspace_id, actor, WorkspaceShareRole.VIEWER
+            )
+            return self._store.page_projects(
+                [workspace.organization_id], workspace_id=workspace_id, page=page
+            )
+        orgs, shared_ids = self._visibility(actor, organization_id)
+        return self._store.page_projects(orgs, shared_ids, page=page)
+
     def list_projects(
         self,
         actor: Actor,
         organization_id: str | None = None,
         workspace_id: str | None = None,
     ) -> list[Project]:
-        if workspace_id is not None:
-            workspace = self.require_workspace_role(
-                workspace_id, actor, WorkspaceShareRole.VIEWER
-            )
-            return self._store.list_projects(
-                [workspace.organization_id], workspace_id=workspace_id
-            )
-
-        by_id: dict[str, Project] = {}
-        if organization_id is not None:
-            if organization_id in actor.organization_ids:
-                for project in self._store.list_projects([organization_id]):
-                    by_id[project.id] = project
-            for share in self._store.list_shares_for_subject(actor.subject):
-                workspace = self._store.get_workspace(share.workspace_id)
-                if workspace is None or workspace.organization_id != organization_id:
-                    continue
-                for project in self._store.list_projects(
-                    [organization_id], workspace_id=workspace.id
-                ):
-                    by_id[project.id] = project
-            if not by_id and organization_id not in actor.organization_ids:
-                organization_service.require_access(actor, organization_id)
-        else:
-            if actor.organization_ids:
-                for project in self._store.list_projects(actor.organization_ids):
-                    by_id[project.id] = project
-            for share in self._store.list_shares_for_subject(actor.subject):
-                workspace = self._store.get_workspace(share.workspace_id)
-                if workspace is None or workspace.organization_id in actor.organization_ids:
-                    continue
-                for project in self._store.list_projects(
-                    [workspace.organization_id], workspace_id=workspace.id
-                ):
-                    by_id[project.id] = project
-        return sorted(by_id.values(), key=lambda item: item.created_at)
+        return self.page_projects(actor, organization_id, workspace_id).items
 
     def get_project(self, project_id: str, actor: Actor) -> Project:
         project = self._store.get_project(project_id)
@@ -596,51 +602,30 @@ class ElnService:
         )
         return protocol
 
+    def page_protocols(
+        self,
+        actor: Actor,
+        organization_id: str | None = None,
+        workspace_id: str | None = None,
+        page: PageRequest | None = None,
+    ) -> PageResult[Protocol]:
+        if workspace_id is not None:
+            workspace = self.require_workspace_role(
+                workspace_id, actor, WorkspaceShareRole.VIEWER
+            )
+            return self._store.page_protocols(
+                [workspace.organization_id], workspace_id=workspace_id, page=page
+            )
+        orgs, shared_ids = self._visibility(actor, organization_id)
+        return self._store.page_protocols(orgs, shared_ids, page=page)
+
     def list_protocols(
         self,
         actor: Actor,
         organization_id: str | None = None,
         workspace_id: str | None = None,
     ) -> list[Protocol]:
-        if workspace_id is not None:
-            workspace = self.require_workspace_role(
-                workspace_id, actor, WorkspaceShareRole.VIEWER
-            )
-            return self._store.list_protocols(
-                [workspace.organization_id], workspace_id=workspace_id
-            )
-
-        by_id: dict[str, Protocol] = {}
-        if organization_id is not None:
-            if organization_id in actor.organization_ids:
-                # Org members already see every workspace protocol in the org;
-                # skip the per-share N+1 loop.
-                for protocol in self._store.list_protocols([organization_id]):
-                    by_id[protocol.id] = protocol
-            else:
-                for share in self._store.list_shares_for_subject(actor.subject):
-                    workspace = self._store.get_workspace(share.workspace_id)
-                    if workspace is None or workspace.organization_id != organization_id:
-                        continue
-                    for protocol in self._store.list_protocols(
-                        [organization_id], workspace_id=workspace.id
-                    ):
-                        by_id[protocol.id] = protocol
-                if not by_id:
-                    organization_service.require_access(actor, organization_id)
-        else:
-            if actor.organization_ids:
-                for protocol in self._store.list_protocols(actor.organization_ids):
-                    by_id[protocol.id] = protocol
-            for share in self._store.list_shares_for_subject(actor.subject):
-                workspace = self._store.get_workspace(share.workspace_id)
-                if workspace is None or workspace.organization_id in actor.organization_ids:
-                    continue
-                for protocol in self._store.list_protocols(
-                    [workspace.organization_id], workspace_id=workspace.id
-                ):
-                    by_id[protocol.id] = protocol
-        return sorted(by_id.values(), key=lambda item: item.created_at)
+        return self.page_protocols(actor, organization_id, workspace_id).items
 
     def get_protocol(self, protocol_id: str, actor: Actor) -> Protocol:
         protocol = self._store.get_protocol(protocol_id)
@@ -816,52 +801,33 @@ class ElnService:
         )
         return experiment
 
+    def page_experiments(
+        self,
+        actor: Actor,
+        organization_id: str | None = None,
+        project_id: str | None = None,
+        page: PageRequest | None = None,
+    ) -> PageResult[Experiment]:
+        if project_id is not None:
+            project = self.get_project(project_id, actor)
+            return self._store.page_experiments(
+                [project.organization_id], project_id=project_id, page=page
+            )
+        orgs, shared_workspace_ids = self._visibility(actor, organization_id)
+        shared_project_ids = (
+            self._store.project_ids_in_workspaces(shared_workspace_ids)
+            if shared_workspace_ids
+            else []
+        )
+        return self._store.page_experiments(orgs, shared_project_ids, page=page)
+
     def list_experiments(
         self,
         actor: Actor,
         organization_id: str | None = None,
         project_id: str | None = None,
     ) -> list[Experiment]:
-        if project_id is not None:
-            project = self.get_project(project_id, actor)
-            return self._store.list_experiments(
-                [project.organization_id], project_id=project_id
-            )
-
-        by_id: dict[str, Experiment] = {}
-        if organization_id is not None:
-            if organization_id in actor.organization_ids:
-                for experiment in self._store.list_experiments([organization_id]):
-                    by_id[experiment.id] = experiment
-            for share in self._store.list_shares_for_subject(actor.subject):
-                workspace = self._store.get_workspace(share.workspace_id)
-                if workspace is None or workspace.organization_id != organization_id:
-                    continue
-                for project in self._store.list_projects(
-                    [organization_id], workspace_id=workspace.id
-                ):
-                    for experiment in self._store.list_experiments(
-                        [organization_id], project_id=project.id
-                    ):
-                        by_id[experiment.id] = experiment
-            if not by_id and organization_id not in actor.organization_ids:
-                organization_service.require_access(actor, organization_id)
-        else:
-            if actor.organization_ids:
-                for experiment in self._store.list_experiments(actor.organization_ids):
-                    by_id[experiment.id] = experiment
-            for share in self._store.list_shares_for_subject(actor.subject):
-                workspace = self._store.get_workspace(share.workspace_id)
-                if workspace is None or workspace.organization_id in actor.organization_ids:
-                    continue
-                for project in self._store.list_projects(
-                    [workspace.organization_id], workspace_id=workspace.id
-                ):
-                    for experiment in self._store.list_experiments(
-                        [workspace.organization_id], project_id=project.id
-                    ):
-                        by_id[experiment.id] = experiment
-        return sorted(by_id.values(), key=lambda item: item.created_at)
+        return self.page_experiments(actor, organization_id, project_id).items
 
     def get_experiment(self, experiment_id: str, actor: Actor) -> Experiment:
         experiment = self._store.get_experiment(experiment_id)
@@ -938,11 +904,16 @@ class ElnService:
         )
         return version
 
+    def page_versions(
+        self, experiment_id: str, actor: Actor, page: PageRequest | None = None
+    ) -> PageResult[ExperimentVersion]:
+        self.get_experiment(experiment_id, actor)
+        return self._store.page_versions(experiment_id, page)
+
     def list_versions(
         self, experiment_id: str, actor: Actor
     ) -> list[ExperimentVersion]:
-        self.get_experiment(experiment_id, actor)
-        return self._store.list_versions(experiment_id)
+        return self.page_versions(experiment_id, actor).items
 
     def get_version(
         self, experiment_id: str, version_id: str, actor: Actor
@@ -1065,9 +1036,14 @@ class ElnService:
         )
         return sample
 
-    def list_samples(self, experiment_id: str, actor: Actor) -> list[Sample]:
+    def page_samples(
+        self, experiment_id: str, actor: Actor, page: PageRequest | None = None
+    ) -> PageResult[Sample]:
         self.get_experiment(experiment_id, actor)
-        return self._store.list_samples(experiment_id)
+        return self._store.page_samples(experiment_id, page)
+
+    def list_samples(self, experiment_id: str, actor: Actor) -> list[Sample]:
+        return self.page_samples(experiment_id, actor).items
 
     def get_sample(self, sample_id: str, actor: Actor) -> Sample:
         sample = self._store.get_sample(sample_id)
@@ -1171,9 +1147,14 @@ class ElnService:
         )
         return dataset
 
-    def list_datasets(self, sample_id: str, actor: Actor) -> list[Dataset]:
+    def page_datasets(
+        self, sample_id: str, actor: Actor, page: PageRequest | None = None
+    ) -> PageResult[Dataset]:
         self.get_sample(sample_id, actor)
-        return self._store.list_datasets(sample_id)
+        return self._store.page_datasets(sample_id, page)
+
+    def list_datasets(self, sample_id: str, actor: Actor) -> list[Dataset]:
+        return self.page_datasets(sample_id, actor).items
 
     def get_dataset(self, dataset_id: str, actor: Actor) -> Dataset:
         dataset = self._store.get_dataset(dataset_id)

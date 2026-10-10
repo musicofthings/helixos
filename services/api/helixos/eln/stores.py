@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import Protocol
+from dataclasses import dataclass, field
+from typing import Generic, TypeVar
+from typing import Protocol as TypingProtocol
 
 from helixos.eln.schemas import (
     Dataset,
@@ -17,6 +19,25 @@ from helixos.eln.schemas import (
     WorkspaceInvite,
     WorkspaceShare,
 )
+
+
+T = TypeVar("T")
+
+
+@dataclass(frozen=True)
+class PageRequest:
+    """A window over an ordered result set."""
+
+    limit: int
+    offset: int = 0
+
+
+@dataclass
+class PageResult(Generic[T]):
+    """One page of items plus the size of the full (unpaged) result set."""
+
+    items: list[T] = field(default_factory=list)
+    total: int = 0
 
 
 class PlateFullError(Exception):
@@ -35,7 +56,7 @@ class WellOccupiedError(Exception):
     """Raised when another sample already occupies the requested well."""
 
 
-class ElnStore(Protocol):
+class ElnStore(TypingProtocol):
     """Repository contract for ELN entities.
 
     All list/get methods that take ``organization_ids`` enforce tenant
@@ -48,6 +69,17 @@ class ElnStore(Protocol):
     def get_workspace(self, workspace_id: str) -> Workspace | None: ...
     def list_workspaces(self, organization_ids: Sequence[str]) -> list[Workspace]: ...
     def count_workspaces(self, organization_id: str) -> int: ...
+    def page_workspaces(
+        self,
+        organization_ids: Sequence[str],
+        shared_workspace_ids: Sequence[str],
+        page: PageRequest | None = None,
+    ) -> PageResult[Workspace]:
+        """Workspaces in ``organization_ids`` or listed in ``shared_workspace_ids``.
+
+        Ordered by (created_at, id); ``page=None`` returns everything.
+        """
+        ...
     def delete_workspace(self, workspace_id: str) -> None:
         """Delete a workspace and its entire subtree (projects and below)."""
         ...
@@ -83,6 +115,17 @@ class ElnStore(Protocol):
     def list_projects(
         self, organization_ids: Sequence[str], workspace_id: str | None = None
     ) -> list[Project]: ...
+    def page_projects(
+        self,
+        organization_ids: Sequence[str],
+        shared_workspace_ids: Sequence[str] = (),
+        workspace_id: str | None = None,
+        page: PageRequest | None = None,
+    ) -> PageResult[Project]:
+        """Projects in ``organization_ids`` or in a shared workspace."""
+        ...
+
+    def project_ids_in_workspaces(self, workspace_ids: Sequence[str]) -> list[str]: ...
     def update_project(self, project: Project) -> Project: ...
     def delete_project(self, project_id: str) -> None:
         """Delete a project and every experiment (and below) inside it."""
@@ -94,6 +137,13 @@ class ElnStore(Protocol):
     def list_protocols(
         self, organization_ids: Sequence[str], workspace_id: str | None = None
     ) -> list[Protocol]: ...
+    def page_protocols(
+        self,
+        organization_ids: Sequence[str],
+        shared_workspace_ids: Sequence[str] = (),
+        workspace_id: str | None = None,
+        page: PageRequest | None = None,
+    ) -> PageResult[Protocol]: ...
     def update_protocol(self, protocol: Protocol) -> Protocol: ...
     def delete_protocol(self, protocol_id: str) -> None: ...
 
@@ -108,6 +158,16 @@ class ElnStore(Protocol):
     def list_experiments(
         self, organization_ids: Sequence[str], project_id: str | None = None
     ) -> list[Experiment]: ...
+    def page_experiments(
+        self,
+        organization_ids: Sequence[str],
+        shared_project_ids: Sequence[str] = (),
+        project_id: str | None = None,
+        page: PageRequest | None = None,
+    ) -> PageResult[Experiment]:
+        """Experiments in ``organization_ids`` or in a shared project."""
+        ...
+
     def update_experiment(self, experiment: Experiment) -> Experiment: ...
     def delete_experiment(self, experiment_id: str) -> None:
         """Delete an experiment and its versions, samples, and datasets."""
@@ -125,6 +185,9 @@ class ElnStore(Protocol):
 
     def get_version(self, version_id: str) -> ExperimentVersion | None: ...
     def list_versions(self, experiment_id: str) -> list[ExperimentVersion]: ...
+    def page_versions(
+        self, experiment_id: str, page: PageRequest | None = None
+    ) -> PageResult[ExperimentVersion]: ...
     def update_version(
         self, version: ExperimentVersion, expected_status: ExperimentStatus
     ) -> ExperimentVersion:
@@ -146,6 +209,9 @@ class ElnStore(Protocol):
 
     def get_sample(self, sample_id: str) -> Sample | None: ...
     def list_samples(self, experiment_id: str) -> list[Sample]: ...
+    def page_samples(
+        self, experiment_id: str, page: PageRequest | None = None
+    ) -> PageResult[Sample]: ...
     def count_samples(self, experiment_id: str) -> int: ...
     def well_occupied(
         self,
@@ -162,3 +228,6 @@ class ElnStore(Protocol):
     def create_dataset(self, dataset: Dataset) -> Dataset: ...
     def get_dataset(self, dataset_id: str) -> Dataset | None: ...
     def list_datasets(self, sample_id: str) -> list[Dataset]: ...
+    def page_datasets(
+        self, sample_id: str, page: PageRequest | None = None
+    ) -> PageResult[Dataset]: ...

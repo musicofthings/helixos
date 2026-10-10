@@ -9,7 +9,7 @@ from collections.abc import Sequence
 from datetime import datetime, timezone
 from typing import TypeVar
 
-from sqlalchemy import func, select, update
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.exc import IntegrityError, OperationalError
 
 from helixos.db.session import in_unit_of_work, session_scope
@@ -39,6 +39,8 @@ from helixos.eln.schemas import (
     WorkspaceShare,
 )
 from helixos.eln.stores import (
+    PageRequest,
+    PageResult,
     InviteUnavailableError,
     PlateFullError,
     StaleStateError,
@@ -71,6 +73,19 @@ def _retry_on_write_conflict(operation: Callable[[], T]) -> T:
     raise RuntimeError(
         "Failed to commit experiment version after retries"
     ) from last_error
+
+
+def _fetch_page(session, query, order_by, convert, page: PageRequest | None) -> PageResult:
+    """Run ``query`` ordered and (optionally) windowed in SQL, plus a total count."""
+    total = int(
+        session.scalar(select(func.count()).select_from(query.order_by(None).subquery()))
+        or 0
+    )
+    ordered = query.order_by(*order_by)
+    if page is not None:
+        ordered = ordered.limit(page.limit).offset(page.offset)
+    rows = session.scalars(ordered).all()
+    return PageResult(items=[convert(row) for row in rows], total=total)
 
 
 def _now() -> datetime:
@@ -129,6 +144,18 @@ class SqlElnStore:
                     .where(WorkspaceORM.organization_id == organization_id)
                 )
                 or 0
+            )
+
+    def page_workspaces(self, organization_ids, shared_workspace_ids, page=None):
+        with session_scope() as session:
+            query = select(WorkspaceORM).where(
+                or_(
+                    WorkspaceORM.organization_id.in_(list(organization_ids)),
+                    WorkspaceORM.id.in_(list(shared_workspace_ids)),
+                )
+            )
+            return _fetch_page(
+                session, query, (WorkspaceORM.created_at, WorkspaceORM.id), _to_workspace, page
             )
 
     def delete_workspace(self, workspace_id: str) -> None:
@@ -363,6 +390,32 @@ class SqlElnStore:
             rows = session.scalars(query.order_by(ProjectORM.created_at.asc())).all()
             return [_to_project(row) for row in rows]
 
+    def page_projects(
+        self, organization_ids, shared_workspace_ids=(), workspace_id=None, page=None
+    ):
+        with session_scope() as session:
+            query = select(ProjectORM).where(
+                or_(
+                    ProjectORM.organization_id.in_(list(organization_ids)),
+                    ProjectORM.workspace_id.in_(list(shared_workspace_ids)),
+                )
+            )
+            if workspace_id is not None:
+                query = query.where(ProjectORM.workspace_id == workspace_id)
+            return _fetch_page(
+                session, query, (ProjectORM.created_at, ProjectORM.id), _to_project, page
+            )
+
+    def project_ids_in_workspaces(self, workspace_ids):
+        with session_scope() as session:
+            return list(
+                session.scalars(
+                    select(ProjectORM.id).where(
+                        ProjectORM.workspace_id.in_(list(workspace_ids))
+                    )
+                )
+            )
+
     def update_project(self, project: Project) -> Project:
         with session_scope() as session:
             row = session.get(ProjectORM, project.id)
@@ -416,6 +469,22 @@ class SqlElnStore:
                 query = query.where(ProtocolORM.workspace_id == workspace_id)
             rows = session.scalars(query.order_by(ProtocolORM.created_at.asc())).all()
             return [_to_protocol(row) for row in rows]
+
+    def page_protocols(
+        self, organization_ids, shared_workspace_ids=(), workspace_id=None, page=None
+    ):
+        with session_scope() as session:
+            query = select(ProtocolORM).where(
+                or_(
+                    ProtocolORM.organization_id.in_(list(organization_ids)),
+                    ProtocolORM.workspace_id.in_(list(shared_workspace_ids)),
+                )
+            )
+            if workspace_id is not None:
+                query = query.where(ProtocolORM.workspace_id == workspace_id)
+            return _fetch_page(
+                session, query, (ProtocolORM.created_at, ProtocolORM.id), _to_protocol, page
+            )
 
     def update_protocol(self, protocol: Protocol) -> Protocol:
         with session_scope() as session:
@@ -478,6 +547,22 @@ class SqlElnStore:
                 query = query.where(ExperimentORM.project_id == project_id)
             rows = session.scalars(query.order_by(ExperimentORM.created_at.asc())).all()
             return [_to_experiment(row) for row in rows]
+
+    def page_experiments(
+        self, organization_ids, shared_project_ids=(), project_id=None, page=None
+    ):
+        with session_scope() as session:
+            query = select(ExperimentORM).where(
+                or_(
+                    ExperimentORM.organization_id.in_(list(organization_ids)),
+                    ExperimentORM.project_id.in_(list(shared_project_ids)),
+                )
+            )
+            if project_id is not None:
+                query = query.where(ExperimentORM.project_id == project_id)
+            return _fetch_page(
+                session, query, (ExperimentORM.created_at, ExperimentORM.id), _to_experiment, page
+            )
 
     def update_experiment(self, experiment: Experiment) -> Experiment:
         with session_scope() as session:
@@ -579,6 +664,15 @@ class SqlElnStore:
             ).all()
             return [_to_version(row) for row in rows]
 
+    def page_versions(self, experiment_id, page=None):
+        with session_scope() as session:
+            query = select(ExperimentVersionORM).where(
+                ExperimentVersionORM.experiment_id == experiment_id
+            )
+            return _fetch_page(
+                session, query, (ExperimentVersionORM.version_number,), _to_version, page
+            )
+
     def update_version(
         self, version: ExperimentVersion, expected_status: ExperimentStatus
     ) -> ExperimentVersion:
@@ -669,6 +763,13 @@ class SqlElnStore:
             ).all()
             return [_to_sample(row) for row in rows]
 
+    def page_samples(self, experiment_id, page=None):
+        with session_scope() as session:
+            query = select(SampleORM).where(SampleORM.experiment_id == experiment_id)
+            return _fetch_page(
+                session, query, (SampleORM.created_at, SampleORM.id), _to_sample, page
+            )
+
     def count_samples(self, experiment_id: str) -> int:
         with session_scope() as session:
             return int(
@@ -747,6 +848,13 @@ class SqlElnStore:
                 .order_by(DatasetORM.created_at.asc())
             ).all()
             return [_to_dataset(row) for row in rows]
+
+    def page_datasets(self, sample_id, page=None):
+        with session_scope() as session:
+            query = select(DatasetORM).where(DatasetORM.sample_id == sample_id)
+            return _fetch_page(
+                session, query, (DatasetORM.created_at, DatasetORM.id), _to_dataset, page
+            )
 
 
 def _version_row(version: ExperimentVersion) -> ExperimentVersionORM:

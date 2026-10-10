@@ -11,6 +11,8 @@ from typing import TypeVar
 
 from fastapi import Query, Response
 
+from helixos.eln.stores import PageRequest, PageResult
+
 T = TypeVar("T")
 
 DEFAULT_PAGE_SIZE = 100
@@ -33,8 +35,26 @@ def page_params(
     return PageParams(limit=limit, offset=offset)
 
 
+def to_request(page: PageParams) -> PageRequest:
+    """The store-level window for a parsed request."""
+    return PageRequest(limit=page.limit, offset=page.offset)
+
+
+def describe_page(result: PageResult[T], page: PageParams, response: Response) -> list[T]:
+    """Write page headers for a result the store already windowed in SQL."""
+    response.headers["X-Total-Count"] = str(result.total)
+    end = page.offset + page.limit
+    if end < result.total:
+        response.headers["X-Next-Offset"] = str(end)
+    return result.items
+
+
 def paginate(items: Sequence[T], page: PageParams, response: Response) -> list[T]:
-    """Slice ``items`` and describe the page in response headers."""
+    """Slice an in-memory sequence and describe the page in response headers.
+
+    For data that lives in a store, prefer ``to_request`` + ``describe_page`` so
+    the window is applied in the query.
+    """
     total = len(items)
     end = page.offset + page.limit
     response.headers["X-Total-Count"] = str(total)

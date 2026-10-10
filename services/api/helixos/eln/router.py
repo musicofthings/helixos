@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, Query, Response
 
 from helixos.auth.schemas import Actor
 from helixos.auth.service import get_current_actor
-from helixos.pagination import PageParams, page_params, paginate
+from helixos.pagination import PageParams, describe_page, page_params, to_request
 from helixos.eln.schemas import (
     Dataset,
     DatasetCreate,
@@ -63,8 +63,10 @@ def list_workspaces(
     actor: Actor = Depends(get_current_actor),
 ) -> list[Workspace]:
     """List workspaces visible to the caller."""
-    items = eln_service.list_workspaces(actor=actor, organization_id=organization_id)
-    return paginate(items, page, response)
+    result = eln_service.page_workspaces(
+        actor=actor, organization_id=organization_id, page=to_request(page)
+    )
+    return describe_page(result, page, response)
 
 
 @router.post("/workspaces/seed-defaults", response_model=list[Workspace])
@@ -192,10 +194,13 @@ def list_projects(
     actor: Actor = Depends(get_current_actor),
 ) -> list[Project]:
     """List projects, optionally filtered by workspace."""
-    items = eln_service.list_projects(
-        actor=actor, organization_id=organization_id, workspace_id=workspace_id
+    result = eln_service.page_projects(
+        actor=actor,
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        page=to_request(page),
     )
-    return paginate(items, page, response)
+    return describe_page(result, page, response)
 
 
 @router.get("/projects/{project_id}", response_model=Project)
@@ -248,10 +253,13 @@ def list_protocols(
     actor: Actor = Depends(get_current_actor),
 ) -> list[Protocol]:
     """List protocols, optionally filtered by workspace."""
-    items = eln_service.list_protocols(
-        actor=actor, organization_id=organization_id, workspace_id=workspace_id
+    result = eln_service.page_protocols(
+        actor=actor,
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        page=to_request(page),
     )
-    return paginate(items, page, response)
+    return describe_page(result, page, response)
 
 
 @router.get("/protocols/{protocol_id}", response_model=Protocol)
@@ -296,10 +304,13 @@ def list_experiments(
     actor: Actor = Depends(get_current_actor),
 ) -> list[Experiment]:
     """List experiments visible to the caller."""
-    items = eln_service.list_experiments(
-        actor=actor, organization_id=organization_id, project_id=project_id
+    result = eln_service.page_experiments(
+        actor=actor,
+        organization_id=organization_id,
+        project_id=project_id,
+        page=to_request(page),
     )
-    return paginate(items, page, response)
+    return describe_page(result, page, response)
 
 
 @router.get("/experiments/{experiment_id}", response_model=Experiment)
@@ -342,8 +353,8 @@ def list_experiment_versions(
     actor: Actor = Depends(get_current_actor),
 ) -> list[ExperimentVersion]:
     """List the version history for an experiment."""
-    items = eln_service.list_versions(experiment_id, actor=actor)
-    return paginate(items, page, response)
+    result = eln_service.page_versions(experiment_id, actor=actor, page=to_request(page))
+    return describe_page(result, page, response)
 
 
 @router.get(
@@ -392,8 +403,8 @@ def list_samples(
     actor: Actor = Depends(get_current_actor),
 ) -> list[Sample]:
     """List samples for an experiment."""
-    items = eln_service.list_samples(experiment_id, actor=actor)
-    return paginate(items, page, response)
+    result = eln_service.page_samples(experiment_id, actor=actor, page=to_request(page))
+    return describe_page(result, page, response)
 
 
 @router.get("/samples/{sample_id}", response_model=Sample)
@@ -437,8 +448,8 @@ def list_datasets(
     actor: Actor = Depends(get_current_actor),
 ) -> list[Dataset]:
     """List datasets attached to a sample."""
-    items = eln_service.list_datasets(sample_id, actor=actor)
-    return paginate(items, page, response)
+    result = eln_service.page_datasets(sample_id, actor=actor, page=to_request(page))
+    return describe_page(result, page, response)
 
 
 @router.get("/datasets/{dataset_id}", response_model=Dataset)
