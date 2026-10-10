@@ -19,7 +19,6 @@ class StubAgentProvider:
         )
         tool_hint = ", ".join(context.tool_summaries) if context.tool_summaries else "no tool summaries"
         response = (
-            f"{context.system_prompt} "
             f"Based on your request ({context.user_message.strip()}), review {focus}. "
             f"The workspace currently has {context.experiment_count} experiment record(s). "
             f"Sequence context: {sequence_hint}. Tool context: {tool_hint}. "
