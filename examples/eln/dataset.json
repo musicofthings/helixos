@@ -1,0 +1,13 @@
+{
+  "id": "ds_demo_1",
+  "organization_id": "org_demo",
+  "sample_id": "smp_demo_a1",
+  "name": "Sanger trace",
+  "dataset_type": "other",
+  "sequence_id": null,
+  "content": {
+    "reads": 1
+  },
+  "created_at": "2026-05-10T00:00:00Z",
+  "updated_at": "2026-05-10T00:00:00Z"
+}

@@ -1,0 +1,14 @@
+{
+  "id": "smp_demo_a1",
+  "organization_id": "org_demo",
+  "experiment_id": "exp_demo_gibson",
+  "name": "Colony 1",
+  "sample_type": "dna",
+  "well_position": "A1",
+  "status": "planned",
+  "metadata": {
+    "volume_ul": 20
+  },
+  "created_at": "2026-05-10T00:00:00Z",
+  "updated_at": "2026-05-10T00:00:00Z"
+}

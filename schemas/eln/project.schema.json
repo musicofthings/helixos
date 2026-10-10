@@ -3,7 +3,7 @@
   "$id": "https://helixos.dev/schemas/eln/project.schema.json",
   "title": "Project",
   "type": "object",
-  "required": ["id", "organization_id", "workspace_id", "name", "status", "created_at", "updated_at"],
+  "required": ["organization_id", "workspace_id", "name", "description", "id", "status", "created_at", "updated_at"],
   "properties": {
     "id": { "type": "string" },
     "organization_id": { "type": "string" },

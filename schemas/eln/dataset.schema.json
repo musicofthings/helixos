@@ -3,7 +3,7 @@
   "$id": "https://helixos.dev/schemas/eln/dataset.schema.json",
   "title": "Dataset",
   "type": "object",
-  "required": ["id", "organization_id", "sample_id", "name", "dataset_type", "content", "created_at", "updated_at"],
+  "required": ["id", "organization_id", "sample_id", "name", "dataset_type", "sequence_id", "content", "created_at", "updated_at"],
   "properties": {
     "id": { "type": "string" },
     "organization_id": { "type": "string" },

@@ -3,7 +3,7 @@
   "$id": "https://helixos.dev/schemas/eln/sample.schema.json",
   "title": "Sample",
   "type": "object",
-  "required": ["id", "organization_id", "experiment_id", "name", "sample_type", "status", "metadata", "created_at", "updated_at"],
+  "required": ["id", "organization_id", "experiment_id", "name", "sample_type", "well_position", "status", "metadata", "created_at", "updated_at"],
   "properties": {
     "id": { "type": "string" },
     "organization_id": { "type": "string" },

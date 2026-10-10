@@ -3,7 +3,7 @@
   "$id": "https://helixos.dev/schemas/eln/workspace.schema.json",
   "title": "Workspace",
   "type": "object",
-  "required": ["id", "organization_id", "name", "category", "is_default", "created_at", "updated_at"],
+  "required": ["organization_id", "name", "category", "subcategory", "description", "id", "is_default", "created_at", "updated_at"],
   "properties": {
     "id": { "type": "string" },
     "organization_id": { "type": "string" },

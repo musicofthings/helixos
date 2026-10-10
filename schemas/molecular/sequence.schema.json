@@ -3,7 +3,7 @@
   "$id": "https://helixos.dev/schemas/molecular/sequence.schema.json",
   "title": "Sequence",
   "type": "object",
-  "required": ["id", "organization_id", "name", "molecule_type", "topology", "length", "created_at", "updated_at"],
+  "required": ["id", "organization_id", "name", "molecule_type", "topology", "length", "features", "created_at", "updated_at"],
   "properties": {
     "id": { "type": "string" },
     "organization_id": { "type": "string" },

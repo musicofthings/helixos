@@ -3,15 +3,7 @@
   "$id": "https://helixos.dev/schemas/eln/workspace_share.schema.json",
   "title": "WorkspaceShare",
   "type": "object",
-  "required": [
-    "id",
-    "workspace_id",
-    "organization_id",
-    "subject",
-    "role",
-    "granted_by",
-    "created_at"
-  ],
+  "required": ["id", "workspace_id", "organization_id", "subject", "role", "granted_by", "created_at"],
   "properties": {
     "id": { "type": "string" },
     "workspace_id": { "type": "string" },

@@ -3,7 +3,7 @@
   "$id": "https://helixos.dev/schemas/eln/experiment.schema.json",
   "title": "Experiment",
   "type": "object",
-  "required": ["id", "organization_id", "name", "version_count", "created_at", "updated_at"],
+  "required": ["id", "organization_id", "project_id", "name", "description", "head_version_id", "version_count", "created_at", "updated_at"],
   "properties": {
     "id": { "type": "string" },
     "organization_id": { "type": "string" },

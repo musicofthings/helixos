@@ -1,0 +1,17 @@
+{
+  "id": "expv_demo_gibson_1",
+  "experiment_id": "exp_demo_gibson",
+  "organization_id": "org_demo",
+  "version_number": 1,
+  "parent_version_id": null,
+  "message": "Initial draft",
+  "status": "draft",
+  "blocks": [
+    {
+      "type": "text",
+      "content": "Plan Gibson assembly using vector backbone and fluorescent reporter insert."
+    }
+  ],
+  "author_subject": "user_demo_scientist",
+  "created_at": "2026-05-10T00:00:00Z"
+}

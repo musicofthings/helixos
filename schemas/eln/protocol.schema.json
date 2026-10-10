@@ -3,17 +3,7 @@
   "$id": "https://helixos.dev/schemas/eln/protocol.schema.json",
   "title": "Protocol",
   "type": "object",
-  "required": [
-    "id",
-    "organization_id",
-    "workspace_id",
-    "name",
-    "status",
-    "steps",
-    "source_provider",
-    "created_at",
-    "updated_at"
-  ],
+  "required": ["organization_id", "workspace_id", "name", "description", "steps", "source_provider", "source_url", "source_external_id", "id", "status", "created_at", "updated_at"],
   "properties": {
     "id": { "type": "string" },
     "organization_id": { "type": "string" },

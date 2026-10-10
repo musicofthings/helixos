@@ -1,0 +1,10 @@
+{
+  "id": "proj_cloning",
+  "organization_id": "org_demo",
+  "workspace_id": "ws_demo_molbio",
+  "name": "Reporter cloning",
+  "description": null,
+  "status": "active",
+  "created_at": "2026-05-10T00:00:00Z",
+  "updated_at": "2026-05-10T00:00:00Z"
+}
