@@ -350,9 +350,11 @@ export class HelixOSClient {
     sessionId: string;
     message: string;
     context?: AgentRunContext;
+    signal?: AbortSignal;
   }): AsyncGenerator<AgentStreamEvent> {
     const response = await fetch(`${this.baseUrl}/api/v1/ai/runs`, {
       method: "POST",
+      signal: input.signal,
       headers: this.headers({ Accept: "text/event-stream" }),
       body: JSON.stringify({
         session_id: input.sessionId,
@@ -383,28 +385,40 @@ export class HelixOSClient {
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
     let buffer = "";
+    let sawDone = false;
 
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
 
-      buffer += decoder.decode(value, { stream: true });
-      const chunks = buffer.split("\n\n");
-      buffer = chunks.pop() ?? "";
+        buffer += decoder.decode(value, { stream: true });
+        const chunks = buffer.split("\n\n");
+        buffer = chunks.pop() ?? "";
 
-      for (const chunk of chunks) {
-        const event = parseSseChunk(chunk);
+        for (const chunk of chunks) {
+          const event = parseSseChunk(chunk);
+          if (event) {
+            sawDone ||= event.event === "done";
+            yield event;
+          }
+        }
+      }
+
+      if (buffer.trim()) {
+        const event = parseSseChunk(buffer);
         if (event) {
+          sawDone ||= event.event === "done";
           yield event;
         }
       }
+    } finally {
+      // Cancels the underlying request when the consumer stops iterating early.
+      await reader.cancel().catch(() => undefined);
     }
 
-    if (buffer.trim()) {
-      const event = parseSseChunk(buffer);
-      if (event) {
-        yield event;
-      }
+    if (!sawDone) {
+      throw new HelixOSApiError(500, "stream_truncated", "Agent run ended before completion");
     }
   }
 }

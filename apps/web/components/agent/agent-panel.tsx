@@ -1,7 +1,7 @@
 "use client";
 
 import { BrainCircuit, History, LoaderCircle, Send, Wand2 } from "lucide-react";
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 
 import type { AgentRunContext } from "@helixos/types";
@@ -45,6 +45,9 @@ export function AgentPanel({
   const [draft, setDraft] = useState("");
   const [isStreaming, setIsStreaming] = useState(false);
   const [toolEvents, setToolEvents] = useState<string[]>([]);
+  const abortRef = useRef<AbortController | null>(null);
+
+  useEffect(() => () => abortRef.current?.abort(), []);
 
   const canRun = Boolean(organizationId && sessionId && draft.trim() && !isStreaming);
 
@@ -73,10 +76,14 @@ export function AgentPanel({
 
     try {
       let assistantText = "";
+      abortRef.current?.abort();
+      const controller = new AbortController();
+      abortRef.current = controller;
       for await (const event of createHelixClient().streamAgentRun({
         sessionId,
         message,
-        context
+        context,
+        signal: controller.signal
       })) {
         if (event.event === "token" && typeof event.data.content === "string") {
           assistantText += event.data.content;
@@ -98,6 +105,9 @@ export function AgentPanel({
       onActivity("Agent run completed");
       await invalidateAuditEvents(queryClient, organizationId);
     } catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") {
+        return;
+      }
       const messageText = error instanceof Error ? error.message : "Agent run failed";
       setMessages((items) =>
         items.map((item) => (item.id === assistantId ? { ...item, content: messageText } : item))
