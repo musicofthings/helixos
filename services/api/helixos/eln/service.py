@@ -7,6 +7,7 @@ scoped and recorded to the audit trail.
 
 from __future__ import annotations
 
+import functools
 import re
 from datetime import datetime, timedelta, timezone
 from typing import Literal
@@ -50,7 +51,14 @@ from helixos.eln.schemas import (
     WorkspaceShareUpdate,
     normalize_well_position,
 )
-from helixos.eln.stores import ElnStore, PlateFullError, WellOccupiedError
+from helixos.db.session import run_atomic
+from helixos.eln.stores import (
+    ElnStore,
+    InviteUnavailableError,
+    PlateFullError,
+    StaleStateError,
+    WellOccupiedError,
+)
 from helixos.errors import api_error
 
 WorkspaceAccess = Literal["owner", "editor", "viewer"]
@@ -112,6 +120,16 @@ def build_eln_store(settings: DatabaseSettings | None = None) -> ElnStore:
     return MemoryElnStore()
 
 
+def _atomic(method):
+    """Commit the wrapped mutation and its audit event in one transaction."""
+
+    @functools.wraps(method)
+    def wrapper(self, *args, **kwargs):
+        return run_atomic(lambda: method(self, *args, **kwargs))
+
+    return wrapper
+
+
 def _now() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -126,9 +144,35 @@ class ElnService:
         """Replace the active store backend (used in tests)."""
         self._store = store
 
+    def _audit(
+        self,
+        *,
+        organization_id: str,
+        actor: Actor,
+        event_type: str,
+        resource_type: str | None = None,
+        resource_id: str | None = None,
+        payload: dict[str, object] | None = None,
+    ) -> None:
+        """Record an audit event for an actor already authorized by workspace policy.
+
+        Workspace collaborators may belong to a different organization, so the
+        org-membership check in ``audit_service.record`` would reject them after
+        the write has already been persisted.
+        """
+        audit_service.record_system(
+            organization_id=organization_id,
+            actor_subject=actor.subject,
+            event_type=event_type,
+            resource_type=resource_type,
+            resource_id=resource_id,
+            payload=payload,
+        )
+
     # ----------------------------------------------------------------- #
     # Workspaces
     # ----------------------------------------------------------------- #
+    @_atomic
     def ensure_default_workspaces(
         self, organization_id: str, actor: Actor
     ) -> list[Workspace]:
@@ -148,7 +192,7 @@ class ElnService:
             )
             self._store.create_workspace(workspace)
             created.append(workspace)
-        audit_service.record(
+        self._audit(
             organization_id=organization_id,
             actor=actor,
             event_type="eln.workspaces_seeded",
@@ -158,11 +202,12 @@ class ElnService:
         )
         return created
 
+    @_atomic
     def create_workspace(self, payload: WorkspaceCreate, actor: Actor) -> Workspace:
         organization_service.require_access(actor, payload.organization_id)
         workspace = Workspace(**payload.model_dump())
         self._store.create_workspace(workspace)
-        audit_service.record(
+        self._audit(
             organization_id=workspace.organization_id,
             actor=actor,
             event_type="eln.workspace_created",
@@ -201,11 +246,12 @@ class ElnService:
             workspace_id, actor, WorkspaceShareRole.VIEWER
         )
 
+    @_atomic
     def delete_workspace(self, workspace_id: str, actor: Actor) -> None:
         """Delete a workspace and everything nested beneath it."""
         workspace = self.require_workspace_role(workspace_id, actor, "owner")
         self._store.delete_workspace(workspace_id)
-        audit_service.record(
+        self._audit(
             organization_id=workspace.organization_id,
             actor=actor,
             event_type="eln.workspace_deleted",
@@ -227,6 +273,7 @@ class ElnService:
         ]
         return self._store.list_shares(workspace_id), invites
 
+    @_atomic
     def create_share(
         self, workspace_id: str, payload: WorkspaceShareCreate, actor: Actor
     ) -> WorkspaceShare:
@@ -248,7 +295,7 @@ class ElnService:
             granted_by=actor.subject,
         )
         self._store.create_share(share)
-        audit_service.record(
+        self._audit(
             organization_id=workspace.organization_id,
             actor=actor,
             event_type="eln.workspace_share_granted",
@@ -262,6 +309,7 @@ class ElnService:
         )
         return share
 
+    @_atomic
     def update_share(
         self,
         workspace_id: str,
@@ -275,7 +323,7 @@ class ElnService:
             raise _not_found("workspace_share", share_id)
         updated = share.model_copy(update={"role": payload.role})
         self._store.update_share(updated)
-        audit_service.record(
+        self._audit(
             organization_id=workspace.organization_id,
             actor=actor,
             event_type="eln.workspace_share_updated",
@@ -289,13 +337,14 @@ class ElnService:
         )
         return updated
 
+    @_atomic
     def revoke_share(self, workspace_id: str, share_id: str, actor: Actor) -> None:
         workspace = self.require_workspace_role(workspace_id, actor, "owner")
         share = self._store.get_share(share_id)
         if share is None or share.workspace_id != workspace_id:
             raise _not_found("workspace_share", share_id)
         self._store.delete_share(share_id)
-        audit_service.record(
+        self._audit(
             organization_id=workspace.organization_id,
             actor=actor,
             event_type="eln.workspace_share_revoked",
@@ -304,6 +353,7 @@ class ElnService:
             payload={"workspace_id": workspace_id, "subject": share.subject},
         )
 
+    @_atomic
     def create_invite(
         self, workspace_id: str, payload: WorkspaceInviteCreate, actor: Actor
     ) -> WorkspaceInvite:
@@ -317,7 +367,7 @@ class ElnService:
             max_uses=payload.max_uses,
         )
         self._store.create_invite(invite)
-        audit_service.record(
+        self._audit(
             organization_id=workspace.organization_id,
             actor=actor,
             event_type="eln.workspace_invite_created",
@@ -332,6 +382,7 @@ class ElnService:
         )
         return invite
 
+    @_atomic
     def revoke_invite(self, workspace_id: str, invite_id: str, actor: Actor) -> None:
         workspace = self.require_workspace_role(workspace_id, actor, "owner")
         invite = self._store.get_invite(invite_id)
@@ -341,7 +392,7 @@ class ElnService:
             return
         updated = invite.model_copy(update={"revoked_at": _now()})
         self._store.update_invite(updated)
-        audit_service.record(
+        self._audit(
             organization_id=workspace.organization_id,
             actor=actor,
             event_type="eln.workspace_invite_revoked",
@@ -350,6 +401,20 @@ class ElnService:
             payload={"workspace_id": workspace_id},
         )
 
+    def _accept_or_410(
+        self, invite: WorkspaceInvite, share: WorkspaceShare | None
+    ) -> None:
+        try:
+            self._store.accept_invite(invite, share)
+        except InviteUnavailableError:
+            raise api_error(
+                status_code=410,
+                code="invite_inactive",
+                message="This invite has expired, been revoked, or reached its use limit",
+                details={"invite_id": invite.id},
+            ) from None
+
+    @_atomic
     def accept_invite(self, token: str, actor: Actor) -> WorkspaceShare:
         invite = self._store.get_invite_by_token(token)
         if invite is None:
@@ -363,7 +428,7 @@ class ElnService:
             )
         existing = self._store.find_share(invite.workspace_id, actor.subject)
         if existing is not None:
-            self._store.accept_invite(invite, None)
+            self._accept_or_410(invite, None)
             return existing
 
         share = WorkspaceShare(
@@ -373,7 +438,7 @@ class ElnService:
             role=invite.role,
             granted_by=invite.created_by,
         )
-        self._store.accept_invite(invite, share)
+        self._accept_or_410(invite, share)
         # Acceptors may not yet belong to the workspace org; record without
         # an org-membership check so shared-with-me onboarding can succeed.
         audit_service.record_system(
@@ -393,6 +458,7 @@ class ElnService:
     # ----------------------------------------------------------------- #
     # Projects
     # ----------------------------------------------------------------- #
+    @_atomic
     def create_project(self, payload: ProjectCreate, actor: Actor) -> Project:
         workspace = self.require_workspace_role(
             payload.workspace_id, actor, WorkspaceShareRole.EDITOR
@@ -401,7 +467,7 @@ class ElnService:
             raise _not_found("workspace", payload.workspace_id)
         project = Project(**payload.model_dump())
         self._store.create_project(project)
-        audit_service.record(
+        self._audit(
             organization_id=project.organization_id,
             actor=actor,
             event_type="eln.project_created",
@@ -463,6 +529,7 @@ class ElnService:
         )
         return project
 
+    @_atomic
     def update_project(
         self, project_id: str, payload: ProjectUpdate, actor: Actor
     ) -> Project:
@@ -478,7 +545,7 @@ class ElnService:
             return project
         updated = project.model_copy(update={**updates, "updated_at": _now()})
         self._store.update_project(updated)
-        audit_service.record(
+        self._audit(
             organization_id=updated.organization_id,
             actor=actor,
             event_type="eln.project_updated",
@@ -488,6 +555,7 @@ class ElnService:
         )
         return updated
 
+    @_atomic
     def delete_project(self, project_id: str, actor: Actor) -> None:
         """Delete a project and every experiment (and below) inside it."""
         project = self._store.get_project(project_id)
@@ -497,7 +565,7 @@ class ElnService:
             project.workspace_id, actor, WorkspaceShareRole.EDITOR
         )
         self._store.delete_project(project_id)
-        audit_service.record(
+        self._audit(
             organization_id=project.organization_id,
             actor=actor,
             event_type="eln.project_deleted",
@@ -509,6 +577,7 @@ class ElnService:
     # ----------------------------------------------------------------- #
     # Protocols
     # ----------------------------------------------------------------- #
+    @_atomic
     def create_protocol(self, payload: ProtocolCreate, actor: Actor) -> Protocol:
         workspace = self.require_workspace_role(
             payload.workspace_id, actor, WorkspaceShareRole.EDITOR
@@ -517,7 +586,7 @@ class ElnService:
             raise _not_found("workspace", payload.workspace_id)
         protocol = Protocol(**payload.model_dump())
         self._store.create_protocol(protocol)
-        audit_service.record(
+        self._audit(
             organization_id=protocol.organization_id,
             actor=actor,
             event_type="eln.protocol_created",
@@ -582,6 +651,7 @@ class ElnService:
         )
         return protocol
 
+    @_atomic
     def update_protocol(
         self, protocol_id: str, payload: ProtocolUpdate, actor: Actor
     ) -> Protocol:
@@ -600,7 +670,7 @@ class ElnService:
             self._store.update_protocol(updated)
         except KeyError as exc:
             raise _not_found("protocol", protocol_id) from exc
-        audit_service.record(
+        self._audit(
             organization_id=updated.organization_id,
             actor=actor,
             event_type="eln.protocol_updated",
@@ -610,6 +680,7 @@ class ElnService:
         )
         return updated
 
+    @_atomic
     def delete_protocol(self, protocol_id: str, actor: Actor) -> None:
         protocol = self._store.get_protocol(protocol_id)
         if protocol is None:
@@ -618,7 +689,7 @@ class ElnService:
             protocol.workspace_id, actor, WorkspaceShareRole.EDITOR
         )
         self._store.delete_protocol(protocol_id)
-        audit_service.record(
+        self._audit(
             organization_id=protocol.organization_id,
             actor=actor,
             event_type="eln.protocol_deleted",
@@ -627,6 +698,7 @@ class ElnService:
             payload={"name": protocol.name, "workspace_id": protocol.workspace_id},
         )
 
+    @_atomic
     def import_protocol(self, payload: ProtocolImportRequest, actor: Actor) -> Protocol:
         """Create a draft protocol shell from an external source.
 
@@ -676,7 +748,7 @@ class ElnService:
         )
         protocol = self.create_protocol(draft, actor=actor)
         # create_protocol already audited as created; record import detail too.
-        audit_service.record(
+        self._audit(
             organization_id=protocol.organization_id,
             actor=actor,
             event_type="eln.protocol_imported",
@@ -698,6 +770,7 @@ class ElnService:
     # ----------------------------------------------------------------- #
     # Experiments + versions
     # ----------------------------------------------------------------- #
+    @_atomic
     def create_experiment(self, payload: ExperimentCreate, actor: Actor) -> Experiment:
         """Create an experiment and its initial draft version (v1)."""
         if payload.project_id is not None:
@@ -733,7 +806,7 @@ class ElnService:
         # Single transaction: an experiment must never exist without its v1.
         self._store.create_experiment_with_version(experiment, version)
 
-        audit_service.record(
+        self._audit(
             organization_id=experiment.organization_id,
             actor=actor,
             event_type="eln.experiment_created",
@@ -799,6 +872,7 @@ class ElnService:
         )
         return experiment
 
+    @_atomic
     def delete_experiment(self, experiment_id: str, actor: Actor) -> None:
         """Delete an experiment and its versions, samples, and datasets."""
         experiment = self._store.get_experiment(experiment_id)
@@ -808,7 +882,7 @@ class ElnService:
             experiment, actor, WorkspaceShareRole.EDITOR
         )
         self._store.delete_experiment(experiment_id)
-        audit_service.record(
+        self._audit(
             organization_id=experiment.organization_id,
             actor=actor,
             event_type="eln.experiment_deleted",
@@ -817,6 +891,7 @@ class ElnService:
             payload={"name": experiment.name, "project_id": experiment.project_id},
         )
 
+    @_atomic
     def commit_version(
         self, experiment_id: str, payload: ExperimentVersionCreate, actor: Actor
     ) -> ExperimentVersion:
@@ -848,7 +923,7 @@ class ElnService:
         )
         version = self._store.append_version(version)
 
-        audit_service.record(
+        self._audit(
             organization_id=experiment.organization_id,
             actor=actor,
             event_type="eln.experiment_version_committed",
@@ -878,6 +953,7 @@ class ElnService:
             raise _not_found("experiment_version", version_id)
         return version
 
+    @_atomic
     def update_version_status(
         self,
         experiment_id: str,
@@ -911,8 +987,16 @@ class ElnService:
             )
         previous = version.status
         updated = version.model_copy(update={"status": payload.status})
-        self._store.update_version(updated)
-        audit_service.record(
+        try:
+            self._store.update_version(updated, expected_status=previous)
+        except StaleStateError:
+            raise api_error(
+                status_code=409,
+                code="version_state_changed",
+                message="Version status changed concurrently; reload and retry",
+                details={"version_id": version_id},
+            ) from None
+        self._audit(
             organization_id=version.organization_id,
             actor=actor,
             event_type="eln.experiment_version_status_changed",
@@ -929,6 +1013,7 @@ class ElnService:
     # ----------------------------------------------------------------- #
     # Samples
     # ----------------------------------------------------------------- #
+    @_atomic
     def create_sample(self, payload: SampleCreate, actor: Actor) -> Sample:
         experiment = self._store.get_experiment(payload.experiment_id)
         if experiment is None or experiment.organization_id != payload.organization_id:
@@ -966,7 +1051,7 @@ class ElnService:
                 },
             ) from None
 
-        audit_service.record(
+        self._audit(
             organization_id=sample.organization_id,
             actor=actor,
             event_type="eln.sample_created",
@@ -996,6 +1081,7 @@ class ElnService:
         )
         return sample
 
+    @_atomic
     def update_sample(
         self, sample_id: str, payload: SampleUpdate, actor: Actor
     ) -> Sample:
@@ -1020,7 +1106,7 @@ class ElnService:
             return sample
         updated = sample.model_copy(update={**updates, "updated_at": _now()})
         self._store.update_sample(updated)
-        audit_service.record(
+        self._audit(
             organization_id=updated.organization_id,
             actor=actor,
             event_type="eln.sample_updated",
@@ -1030,6 +1116,7 @@ class ElnService:
         )
         return updated
 
+    @_atomic
     def delete_sample(self, sample_id: str, actor: Actor) -> None:
         """Delete a sample and every dataset attached to it."""
         sample = self._store.get_sample(sample_id)
@@ -1042,7 +1129,7 @@ class ElnService:
             experiment, actor, WorkspaceShareRole.EDITOR
         )
         self._store.delete_sample(sample_id)
-        audit_service.record(
+        self._audit(
             organization_id=sample.organization_id,
             actor=actor,
             event_type="eln.sample_deleted",
@@ -1058,6 +1145,7 @@ class ElnService:
     # ----------------------------------------------------------------- #
     # Datasets
     # ----------------------------------------------------------------- #
+    @_atomic
     def create_dataset(self, payload: DatasetCreate, actor: Actor) -> Dataset:
         sample = self._store.get_sample(payload.sample_id)
         if sample is None or sample.organization_id != payload.organization_id:
@@ -1070,7 +1158,7 @@ class ElnService:
         )
         dataset = Dataset(**payload.model_dump())
         self._store.create_dataset(dataset)
-        audit_service.record(
+        self._audit(
             organization_id=dataset.organization_id,
             actor=actor,
             event_type="eln.dataset_created",

@@ -1,15 +1,22 @@
 """Database engine and session helpers."""
 
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
+from contextvars import ContextVar
+import random
+import time
+from typing import TypeVar
 
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.engine import Engine
+from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.schema import Table
 
 from helixos.db.base import Base
 from helixos.db.settings import DatabaseSettings, get_database_settings
+
+T = TypeVar("T")
 
 _engine: Engine | None = None
 _session_factory: sessionmaker[Session] | None = None
@@ -82,9 +89,79 @@ def _apply_additive_migrations(engine: Engine) -> None:
                 )
 
 
+# Ambient session shared by every store call made inside ``unit_of_work``.
+_ambient_session: ContextVar[Session | None] = ContextVar("helix_ambient_session", default=None)
+
+
+def in_unit_of_work() -> bool:
+    """True when the caller is inside an active ``unit_of_work``."""
+    return _ambient_session.get() is not None
+
+
+@contextmanager
+def unit_of_work(settings: DatabaseSettings | None = None) -> Iterator[Session | None]:
+    """Run several store calls in one transaction.
+
+    Inside the block, ``session_scope`` joins this session instead of committing,
+    so a domain mutation and its audit event commit or roll back together.
+    Nested blocks join the outer transaction. Without a configured database
+    (in-memory stores) this is a no-op.
+    """
+    if _ambient_session.get() is not None:
+        yield _ambient_session.get()
+        return
+    engine = get_engine(settings)
+    if engine is None or _session_factory is None:
+        yield None
+        return
+
+    session = _session_factory()
+    token = _ambient_session.set(session)
+    try:
+        yield session
+        session.commit()
+    except Exception:
+        session.rollback()
+        raise
+    finally:
+        _ambient_session.reset(token)
+        session.close()
+
+
+def run_atomic(
+    operation: Callable[[], T],
+    *,
+    attempts: int = 12,
+    backoff_base: float = 0.01,
+    backoff_max: float = 0.25,
+) -> T:
+    """Run ``operation`` in a unit of work, retrying the whole transaction on
+    transient write conflicts (audit chain-head collisions, busy SQLite writer).
+
+    Nested calls join the outer transaction and never retry on their own.
+    """
+    if in_unit_of_work():
+        return operation()
+    last_error: Exception | None = None
+    for attempt in range(attempts):
+        try:
+            with unit_of_work():
+                return operation()
+        except (IntegrityError, OperationalError) as exc:
+            last_error = exc
+            time.sleep(random.uniform(0, min(backoff_base * (2**attempt), backoff_max)))
+    raise RuntimeError("Transaction failed after retries") from last_error
+
+
 @contextmanager
 def session_scope(settings: DatabaseSettings | None = None) -> Iterator[Session]:
-    """Provide a transactional SQLAlchemy session."""
+    """Provide a transactional SQLAlchemy session (joins the ambient one if any)."""
+    ambient = _ambient_session.get()
+    if ambient is not None:
+        yield ambient
+        ambient.flush()
+        return
+
     engine = get_engine(settings)
     if engine is None or _session_factory is None:
         raise RuntimeError("Database is not configured")

@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from helixos.eln.schemas import (
     Dataset,
     Experiment,
+    ExperimentStatus,
     ExperimentVersion,
     Project,
     Protocol,
@@ -17,7 +18,12 @@ from helixos.eln.schemas import (
     WorkspaceInvite,
     WorkspaceShare,
 )
-from helixos.eln.stores import PlateFullError, WellOccupiedError
+from helixos.eln.stores import (
+    InviteUnavailableError,
+    PlateFullError,
+    StaleStateError,
+    WellOccupiedError,
+)
 
 
 def _now() -> datetime:
@@ -140,8 +146,11 @@ class MemoryElnStore:
         self, invite: WorkspaceInvite, share: WorkspaceShare | None
     ) -> tuple[WorkspaceInvite, WorkspaceShare | None]:
         with self._lock:
-            updated = invite.model_copy(
-                update={"accepted_count": invite.accepted_count + 1}
+            current = self._invites.get(invite.id)
+            if current is None or not current.is_active:
+                raise InviteUnavailableError(invite.id)
+            updated = current.model_copy(
+                update={"accepted_count": current.accepted_count + 1}
             )
             self._invites[updated.id] = updated
             if share is not None:
@@ -312,8 +321,13 @@ class MemoryElnStore:
         items = [v for v in self._versions.values() if v.experiment_id == experiment_id]
         return sorted(items, key=lambda v: v.version_number)
 
-    def update_version(self, version: ExperimentVersion) -> ExperimentVersion:
+    def update_version(
+        self, version: ExperimentVersion, expected_status: ExperimentStatus
+    ) -> ExperimentVersion:
         with self._lock:
+            current = self._versions.get(version.id)
+            if current is None or current.status != expected_status:
+                raise StaleStateError(version.id)
             self._versions[version.id] = version
         return version
 

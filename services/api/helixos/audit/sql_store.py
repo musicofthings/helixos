@@ -13,7 +13,7 @@ from helixos.audit.models import AuditEventRecord
 from helixos.audit.orm import AuditEventORM
 from helixos.audit.schemas import AuditChainVerification, AuditEvent
 from helixos.auth.schemas import Actor
-from helixos.db.session import session_scope
+from helixos.db.session import in_unit_of_work, session_scope
 
 # SQLite serializes writes, so bursts of concurrent audit appends contend on
 # both the write lock and the (organization_id, sequence_number) unique index.
@@ -42,6 +42,16 @@ class SqlAuditStore:
         # constraint turns that into an IntegrityError; a busy SQLite writer
         # surfaces as OperationalError. Both are transient — retry re-reads the
         # head and recomputes the hash.
+        if in_unit_of_work():
+            # A conflict poisons the shared transaction; the owner retries it whole.
+            return self._append_once(
+                organization_id=organization_id,
+                actor_subject=actor_subject,
+                event_type=event_type,
+                resource_type=resource_type,
+                resource_id=resource_id,
+                payload=dict(payload or {}),
+            )
         last_error: Exception | None = None
         for attempt in range(_APPEND_MAX_ATTEMPTS):
             try:

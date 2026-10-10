@@ -8,6 +8,7 @@ from typing import Protocol
 from helixos.eln.schemas import (
     Dataset,
     Experiment,
+    ExperimentStatus,
     ExperimentVersion,
     Project,
     Protocol,
@@ -20,6 +21,14 @@ from helixos.eln.schemas import (
 
 class PlateFullError(Exception):
     """Raised when an experiment already holds the maximum number of samples."""
+
+
+class StaleStateError(Exception):
+    """Raised when a compare-and-swap write finds the row changed underneath it."""
+
+
+class InviteUnavailableError(Exception):
+    """Raised when an invite is expired, revoked, or out of uses at accept time."""
 
 
 class WellOccupiedError(Exception):
@@ -62,7 +71,10 @@ class ElnStore(Protocol):
     def accept_invite(
         self, invite: WorkspaceInvite, share: WorkspaceShare | None
     ) -> tuple[WorkspaceInvite, WorkspaceShare | None]:
-        """Atomically bump accept count and optionally insert a new share."""
+        """Atomically re-check invite activity, bump the count and insert the share.
+
+        Raises ``InviteUnavailableError`` if the invite is no longer active.
+        """
         ...
 
     # Projects
@@ -113,7 +125,14 @@ class ElnStore(Protocol):
 
     def get_version(self, version_id: str) -> ExperimentVersion | None: ...
     def list_versions(self, experiment_id: str) -> list[ExperimentVersion]: ...
-    def update_version(self, version: ExperimentVersion) -> ExperimentVersion: ...
+    def update_version(
+        self, version: ExperimentVersion, expected_status: ExperimentStatus
+    ) -> ExperimentVersion:
+        """Persist ``version.status`` only if the stored status is still ``expected_status``.
+
+        Raises ``StaleStateError`` when another request changed it first.
+        """
+        ...
 
     # Samples
     def create_sample(self, sample: Sample, max_samples: int) -> Sample:

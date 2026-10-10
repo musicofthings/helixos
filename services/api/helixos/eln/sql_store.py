@@ -9,10 +9,10 @@ from collections.abc import Sequence
 from datetime import datetime, timezone
 from typing import TypeVar
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError, OperationalError
 
-from helixos.db.session import session_scope
+from helixos.db.session import in_unit_of_work, session_scope
 from helixos.eln.orm import (
     DatasetORM,
     ExperimentORM,
@@ -28,6 +28,7 @@ from helixos.eln.schemas import (
     Dataset,
     Experiment,
     ExperimentBlock,
+    ExperimentStatus,
     ExperimentVersion,
     Project,
     Protocol,
@@ -37,7 +38,12 @@ from helixos.eln.schemas import (
     WorkspaceInvite,
     WorkspaceShare,
 )
-from helixos.eln.stores import PlateFullError, WellOccupiedError
+from helixos.eln.stores import (
+    InviteUnavailableError,
+    PlateFullError,
+    StaleStateError,
+    WellOccupiedError,
+)
 
 
 T = TypeVar("T")
@@ -51,6 +57,9 @@ _BACKOFF_MAX_SECONDS = 0.25
 
 
 def _retry_on_write_conflict(operation: Callable[[], T]) -> T:
+    if in_unit_of_work():
+        # A conflict poisons the shared transaction; the owner retries it whole.
+        return operation()
     last_error: Exception | None = None
     for attempt in range(_MAX_ATTEMPTS):
         try:
@@ -272,25 +281,45 @@ class SqlElnStore:
     def accept_invite(
         self, invite: WorkspaceInvite, share: WorkspaceShare | None
     ) -> tuple[WorkspaceInvite, WorkspaceShare | None]:
-        with session_scope() as session:
-            row = session.get(WorkspaceInviteORM, invite.id)
-            if row is None:
-                raise KeyError(invite.id)
-            row.accepted_count = invite.accepted_count + 1
-            updated = _to_invite(row)
-            if share is not None:
-                session.add(
-                    WorkspaceShareORM(
-                        id=share.id,
-                        workspace_id=share.workspace_id,
-                        organization_id=share.organization_id,
-                        subject=share.subject,
-                        role=share.role.value,
-                        granted_by=share.granted_by,
-                        created_at=share.created_at,
+        # Optimistic loop: re-read, re-check activity, then bump the counter only
+        # if it is unchanged. A lost race re-reads and re-checks the use limit.
+        for _ in range(_MAX_ATTEMPTS):
+            with session_scope() as session:
+                row = session.get(WorkspaceInviteORM, invite.id)
+                if row is None:
+                    raise KeyError(invite.id)
+                current = _to_invite(row)
+                if not current.is_active:
+                    raise InviteUnavailableError(invite.id)
+                result = session.execute(
+                    update(WorkspaceInviteORM)
+                    .where(
+                        WorkspaceInviteORM.id == invite.id,
+                        WorkspaceInviteORM.accepted_count == current.accepted_count,
+                        WorkspaceInviteORM.revoked_at.is_(None),
                     )
+                    .values(accepted_count=current.accepted_count + 1)
                 )
-            return updated, share
+                if result.rowcount == 1:
+                    if share is not None:
+                        session.add(
+                            WorkspaceShareORM(
+                                id=share.id,
+                                workspace_id=share.workspace_id,
+                                organization_id=share.organization_id,
+                                subject=share.subject,
+                                role=share.role.value,
+                                granted_by=share.granted_by,
+                                created_at=share.created_at,
+                            )
+                        )
+                    return (
+                        current.model_copy(
+                            update={"accepted_count": current.accepted_count + 1}
+                        ),
+                        share,
+                    )
+        raise InviteUnavailableError(invite.id)
 
     # Projects
     def create_project(self, project: Project) -> Project:
@@ -542,17 +571,34 @@ class SqlElnStore:
             ).all()
             return [_to_version(row) for row in rows]
 
-    def update_version(self, version: ExperimentVersion) -> ExperimentVersion:
+    def update_version(
+        self, version: ExperimentVersion, expected_status: ExperimentStatus
+    ) -> ExperimentVersion:
         with session_scope() as session:
-            row = session.get(ExperimentVersionORM, version.id)
-            if row is not None:
-                row.status = version.status.value
+            result = session.execute(
+                update(ExperimentVersionORM)
+                .where(
+                    ExperimentVersionORM.id == version.id,
+                    ExperimentVersionORM.status == expected_status.value,
+                )
+                .values(status=version.status.value)
+            )
+            if result.rowcount != 1:
+                raise StaleStateError(version.id)
         return version
 
     # Samples
     def create_sample(self, sample: Sample, max_samples: int) -> Sample:
         def _insert() -> Sample:
             with session_scope() as session:
+                # Serialize capacity allocation per plate: on PostgreSQL concurrent
+                # transactions cannot see each other's uncommitted inserts, so the
+                # post-insert count alone would let two writers both land sample 97.
+                session.execute(
+                    select(ExperimentORM.id)
+                    .where(ExperimentORM.id == sample.experiment_id)
+                    .with_for_update()
+                ).first()
                 if sample.well_position is not None:
                     taken = session.scalar(
                         select(SampleORM.id)
