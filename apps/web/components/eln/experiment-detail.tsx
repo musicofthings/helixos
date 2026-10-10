@@ -22,6 +22,7 @@ import {
   type VersionViewModel
 } from "../../lib/experiment-display";
 import { PlateGrid, SAMPLE_TYPE_STYLES } from "./plate-grid";
+import { errorMessage } from "../../lib/error-message";
 
 const SAMPLE_TYPES: SampleType[] = ["dna", "rna", "protein", "cell", "tissue", "reagent", "other"];
 const SAMPLE_STATUSES: SampleStatus[] = ["planned", "active", "consumed", "archived"];
@@ -127,7 +128,7 @@ export function ExperimentDetail({
       { experimentId: experiment.id, versionId: headVersion.id, status: next },
       {
         onSuccess: (version) => onActivity(`${experiment.id} v${version.versionNumber} marked ${version.status}`),
-        onError: (error) => onActivity(error instanceof Error ? error.message : "Failed to update version")
+        onError: (error) => onActivity(errorMessage(error, "Failed to update version"))
       }
     );
   }
@@ -148,7 +149,7 @@ export function ExperimentDetail({
           setCommitMessage("");
           setCommitBlocks("");
         },
-        onError: (error) => onActivity(error instanceof Error ? error.message : "Failed to commit version")
+        onError: (error) => onActivity(errorMessage(error, "Failed to commit version"))
       }
     );
   }
@@ -188,7 +189,7 @@ export function ExperimentDetail({
           onActivity(`Moved ${sample.name} to ${well}`);
           setEmptyWellIntent(null);
         },
-        onError: (error) => onActivity(error instanceof Error ? error.message : "Failed to move sample")
+        onError: (error) => onActivity(errorMessage(error, "Failed to move sample"))
       }
     );
   }
@@ -213,7 +214,7 @@ export function ExperimentDetail({
           setEmptyWellIntent(null);
           setSelectedSampleId(sample.id);
         },
-        onError: (error) => onActivity(error instanceof Error ? error.message : "Failed to add sample")
+        onError: (error) => onActivity(errorMessage(error, "Failed to add sample"))
       }
     );
   }
@@ -235,7 +236,7 @@ export function ExperimentDetail({
           onActivity(`Updated sample ${sample.name}`);
           setEditing(false);
         },
-        onError: (error) => onActivity(error instanceof Error ? error.message : "Failed to update sample")
+        onError: (error) => onActivity(errorMessage(error, "Failed to update sample"))
       }
     );
   }
@@ -251,7 +252,7 @@ export function ExperimentDetail({
           setSelectedSampleId(undefined);
           setConfirmDelete(false);
         },
-        onError: (error) => onActivity(error instanceof Error ? error.message : "Failed to delete sample")
+        onError: (error) => onActivity(errorMessage(error, "Failed to delete sample"))
       }
     );
   }
@@ -269,7 +270,7 @@ export function ExperimentDetail({
       { organizationId, sampleId: selectedSample.id, name, datasetType, content },
       {
         onSuccess: () => onActivity(`Attached dataset ${name} to ${selectedSample.name}`),
-        onError: (error) => onActivity(error instanceof Error ? error.message : "Failed to add dataset")
+        onError: (error) => onActivity(errorMessage(error, "Failed to add dataset"))
       }
     );
     event.currentTarget.reset();

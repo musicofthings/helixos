@@ -13,6 +13,7 @@ import {
   useWorkspaceCollaboration
 } from "../../hooks/use-helix-api";
 import { getApiBaseUrl } from "../../lib/api-config";
+import { errorMessage } from "../../lib/error-message";
 
 type ShareTab = "collaborators" | "invite";
 
@@ -106,7 +107,7 @@ export function ShareWorkspaceModal({
           setSubject("");
         },
         onError: (error) =>
-          onActivity(error instanceof Error ? error.message : "Failed to add collaborator")
+          onActivity(errorMessage(error, "Failed to add collaborator"))
       }
     );
   }
@@ -123,7 +124,7 @@ export function ShareWorkspaceModal({
           setTab("invite");
         },
         onError: (error) =>
-          onActivity(error instanceof Error ? error.message : "Failed to create invite")
+          onActivity(errorMessage(error, "Failed to create invite"))
       }
     );
   }
@@ -255,7 +256,7 @@ export function ShareWorkspaceModal({
                                   onActivity(`Updated ${updated.subject} to ${updated.role}`),
                                 onError: (error) =>
                                   onActivity(
-                                    error instanceof Error ? error.message : "Failed to update role"
+                                    errorMessage(error, "Failed to update role")
                                   )
                               }
                             )
@@ -275,7 +276,7 @@ export function ShareWorkspaceModal({
                                 onSuccess: () => onActivity(`Revoked access for ${share.subject}`),
                                 onError: (error) =>
                                   onActivity(
-                                    error instanceof Error ? error.message : "Failed to revoke share"
+                                    errorMessage(error, "Failed to revoke share")
                                   )
                               }
                             )
@@ -358,9 +359,7 @@ export function ShareWorkspaceModal({
                                   },
                                   onError: (error) =>
                                     onActivity(
-                                      error instanceof Error
-                                        ? error.message
-                                        : "Failed to revoke invite"
+                                      errorMessage(error, "Failed to revoke invite")
                                     )
                                 }
                               )

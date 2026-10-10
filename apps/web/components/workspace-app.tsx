@@ -46,6 +46,7 @@ import { WorkspaceHome } from "./eln/workspace-home";
 import { formatAuditEventMessage } from "../lib/audit-display";
 import { getApiBaseUrl } from "../lib/api-config";
 import { categoryLabel } from "../lib/workspace-taxonomy";
+import { errorMessage } from "../lib/error-message";
 
 type View =
   | "workspace-home"
@@ -306,7 +307,7 @@ export function WorkspaceApp({ initialDesktopShell = false }: { initialDesktopSh
         }
       },
       onError: (error) =>
-        log(error instanceof Error ? error.message : "Failed to delete workspace")
+        log(errorMessage(error, "Failed to delete workspace"))
     });
   }
 
@@ -402,7 +403,7 @@ export function WorkspaceApp({ initialDesktopShell = false }: { initialDesktopSh
               log(`Ran ${id} analyze_sequence (${summary})`);
             },
             onError: (error) => {
-              const message = error instanceof Error ? error.message : `Failed to run connector ${id}`;
+              const message = errorMessage(error, `Failed to run connector ${id}`);
               setConnectorState((items) => ({
                 ...items,
                 [id]: { enabled: true, lastRun: "Failed" }
@@ -755,7 +756,7 @@ export function WorkspaceApp({ initialDesktopShell = false }: { initialDesktopSh
                           },
                           onError: (error) =>
                             log(
-                              error instanceof Error ? error.message : "Failed to create workspace"
+                              errorMessage(error, "Failed to create workspace")
                             )
                         }
                       );

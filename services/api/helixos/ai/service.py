@@ -19,7 +19,7 @@ from helixos.auth.schemas import Actor
 from helixos.auth.service import organization_service
 from helixos.eln.service import experiment_service
 from helixos.errors import api_error
-from helixos.observability import bind
+from helixos.observability import bind, current_request_id
 
 logger = logging.getLogger("helixos.ai")
 
@@ -158,7 +158,10 @@ class AgentService:
                 resource_id=run.id,
                 payload={"session_id": session_id, "error": str(exc)},
             )
-            yield self._sse("error", {"message": str(exc), "run_id": run.id})
+            yield self._sse(
+                "error",
+                {"message": str(exc), "run_id": run.id, "request_id": current_request_id()},
+            )
             yield self._sse("done", {"run_id": run.id, "status": run.status})
             return
 

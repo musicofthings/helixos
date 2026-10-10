@@ -116,3 +116,32 @@ def test_agent_run_logs_carry_run_id(memory_client, logs) -> None:
     )
     completed = next(r for r in logs if r.getMessage() == "agent run completed")
     assert completed.run_id.startswith("run_") and completed.actor == "user_demo_scientist"
+
+
+def test_failed_agent_run_error_frame_carries_request_id(memory_client, monkeypatch) -> None:
+    from helixos.ai import service as ai_service
+
+    class Exploding:
+        name = "exploding"
+
+        async def stream_response(self, _context):
+            raise RuntimeError("provider down")
+            yield  # pragma: no cover - makes this an async generator
+
+    monkeypatch.setattr(ai_service, "get_agent_provider", lambda: Exploding())
+    session_id = memory_client.post(
+        "/api/v1/ai/sessions", headers=ORG_DEMO, json={"organization_id": "org_demo"}
+    ).json()["id"]
+    response = memory_client.post(
+        "/api/v1/ai/runs",
+        headers=ORG_DEMO,
+        json={"session_id": session_id, "message": "hi", "context": {}},
+    )
+    frame = next(
+        json.loads(line[len("data: ") :])
+        for block in response.text.split("\n\n")
+        if block.startswith("event: error")
+        for line in block.splitlines()
+        if line.startswith("data: ")
+    )
+    assert frame["request_id"] == response.headers["X-Request-ID"]

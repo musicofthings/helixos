@@ -13,6 +13,7 @@ import {
   useProjects
 } from "../../hooks/use-helix-api";
 import { ExperimentDetail } from "./experiment-detail";
+import { errorMessage } from "../../lib/error-message";
 
 type DeleteTarget = { kind: "project" | "experiment"; id: string; name: string };
 
@@ -153,7 +154,7 @@ export function LabView({
           setProjectName("");
           setShowProjectForm(false);
         },
-        onError: (error) => onActivity(error instanceof Error ? error.message : "Failed to create project")
+        onError: (error) => onActivity(errorMessage(error, "Failed to create project"))
       }
     );
   }
@@ -175,7 +176,7 @@ export function LabView({
           setExperimentName("");
           setShowExperimentForm(false);
         },
-        onError: (error) => onActivity(error instanceof Error ? error.message : "Failed to create experiment")
+        onError: (error) => onActivity(errorMessage(error, "Failed to create experiment"))
       }
     );
   }
@@ -188,7 +189,7 @@ export function LabView({
       setDeleteTarget(null);
     };
     const fail = (error: unknown) =>
-      onActivity(error instanceof Error ? error.message : `Failed to delete ${kind}`);
+      onActivity(errorMessage(error, `Failed to delete ${kind}`));
     if (kind === "project") {
       deleteProject.mutate(id, { onSuccess: () => done(`Deleted project ${name}`), onError: fail });
     } else {

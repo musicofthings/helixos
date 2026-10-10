@@ -4,10 +4,12 @@ import { BrainCircuit, History, LoaderCircle, Send, Wand2 } from "lucide-react";
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 
+import { HelixOSApiError } from "@helixos/api-client";
 import type { AgentRunContext } from "@helixos/types";
 
 import { invalidateAuditEvents } from "../../hooks/use-helix-api";
 import { createHelixClient } from "../../lib/api-config";
+import { errorMessage } from "../../lib/error-message";
 
 type AgentPanelProps = {
   organizationId?: string;
@@ -98,7 +100,13 @@ export function AgentPanel({
         }
 
         if (event.event === "error" && typeof event.data.message === "string") {
-          throw new Error(event.data.message);
+          throw new HelixOSApiError(
+            500,
+            "agent_error",
+            event.data.message,
+            {},
+            typeof event.data.request_id === "string" ? event.data.request_id : null
+          );
         }
       }
 
@@ -108,7 +116,7 @@ export function AgentPanel({
       if (error instanceof DOMException && error.name === "AbortError") {
         return;
       }
-      const messageText = error instanceof Error ? error.message : "Agent run failed";
+      const messageText = errorMessage(error, "Agent run failed");
       setMessages((items) =>
         items.map((item) => (item.id === assistantId ? { ...item, content: messageText } : item))
       );
@@ -156,7 +164,7 @@ export function AgentPanel({
         <p className="mt-4 rounded-md bg-[#fbfbf8] p-3 text-sm text-graphite">Connect to the API to start an agent session.</p>
       ) : sessionError && !sessionId ? (
         <div className="mt-4 rounded-md border border-signal/30 bg-[#eef6f7] p-3 text-sm text-signal">
-          <p>Could not start an agent session: {sessionError.message}</p>
+          <p>Could not start an agent session: {errorMessage(sessionError, "unknown error")}</p>
           {onRetrySession ? (
             <button
               type="button"

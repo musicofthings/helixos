@@ -15,6 +15,7 @@ import {
   useExperiments,
   useProjects
 } from "../../hooks/use-helix-api";
+import { errorMessage } from "../../lib/error-message";
 
 export function WorkspaceHome({
   workspace,
@@ -64,7 +65,7 @@ export function WorkspaceHome({
           setShowProjectForm(false);
         },
         onError: (error) =>
-          onActivity(error instanceof Error ? error.message : "Failed to create project")
+          onActivity(errorMessage(error, "Failed to create project"))
       }
     );
   }

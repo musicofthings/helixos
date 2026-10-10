@@ -50,6 +50,7 @@ type ApiErrorBody = {
     code?: string;
     message?: string;
     details?: Record<string, unknown>;
+    request_id?: string;
   };
 };
 
@@ -117,7 +118,8 @@ export class HelixOSClient {
         response.status,
         body.error?.code ?? "http_error",
         body.error?.message ?? `Request failed with status ${response.status}`,
-        body.error?.details ?? {}
+        body.error?.details ?? {},
+        body.error?.request_id ?? response.headers.get("X-Request-ID")
       );
     }
 
@@ -404,12 +406,19 @@ export class HelixOSClient {
         response.status,
         body.error?.code ?? "http_error",
         body.error?.message ?? `Agent run failed with status ${response.status}`,
-        body.error?.details ?? {}
+        body.error?.details ?? {},
+        body.error?.request_id ?? response.headers.get("X-Request-ID")
       );
     }
 
     if (!response.body) {
-      throw new HelixOSApiError(500, "stream_error", "Agent run returned an empty stream");
+      throw new HelixOSApiError(
+        500,
+        "stream_error",
+        "Agent run returned an empty stream",
+        {},
+        response.headers.get("X-Request-ID")
+      );
     }
 
     const reader = response.body.getReader();
@@ -448,7 +457,13 @@ export class HelixOSClient {
     }
 
     if (!sawDone) {
-      throw new HelixOSApiError(500, "stream_truncated", "Agent run ended before completion");
+      throw new HelixOSApiError(
+        500,
+        "stream_truncated",
+        "Agent run ended before completion",
+        {},
+        response.headers.get("X-Request-ID")
+      );
     }
   }
 }

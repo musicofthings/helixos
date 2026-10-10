@@ -11,6 +11,7 @@ import {
   useProtocols,
   useUpdateProtocol
 } from "../../hooks/use-helix-api";
+import { errorMessage } from "../../lib/error-message";
 
 export function ProtocolsView({
   organizationId,
@@ -114,7 +115,7 @@ export function ProtocolsView({
           setMode("view");
         },
         onError: (error) =>
-          onActivity(error instanceof Error ? error.message : "Failed to create protocol")
+          onActivity(errorMessage(error, "Failed to create protocol"))
       }
     );
   }
@@ -132,7 +133,7 @@ export function ProtocolsView({
       {
         onSuccess: (protocol) => onActivity(`Updated protocol ${protocol.name}`),
         onError: (error) =>
-          onActivity(error instanceof Error ? error.message : "Failed to update protocol")
+          onActivity(errorMessage(error, "Failed to update protocol"))
       }
     );
   }
@@ -155,7 +156,7 @@ export function ProtocolsView({
           setMode("view");
         },
         onError: (error) =>
-          onActivity(error instanceof Error ? error.message : "Failed to import protocol")
+          onActivity(errorMessage(error, "Failed to import protocol"))
       }
     );
   }
@@ -375,7 +376,7 @@ export function ProtocolsView({
                     },
                     onError: (error) =>
                       onActivity(
-                        error instanceof Error ? error.message : "Failed to delete protocol"
+                        errorMessage(error, "Failed to delete protocol")
                       )
                   })
                 }
