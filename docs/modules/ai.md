@@ -18,7 +18,7 @@ Events appear in the sidebar audit trail when [audit storage](audit.md) is confi
 
 - Sessions are scoped to an authenticated organization ([auth](auth.md)).
 - Runs stream Server-Sent Events: `token`, `tool_call`, `done`, `error`.
-- Stub provider reads [prompts/eln_copilot.md](../../prompts/eln_copilot.md).
+- The system prompt is [prompts/eln_copilot.md](../../prompts/eln_copilot.md), passed to every provider as instructions. The stub provider ignores it and never repeats it in its output (covered by a unit test and the `system prompt is never echoed` eval).
 - Regulated steps record audit events: `ai.session_created`, `ai.run_started`, `ai.tool_call`, `ai.run_completed`, `ai.run_failed`.
 
 ## Provider Configuration
