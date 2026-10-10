@@ -15,7 +15,8 @@
     "dev:stack": "concurrently -k -n web,desktop -c cyan,magenta \"npm run dev --prefix ../web -- -p 3000\" \"wait-on http-get://127.0.0.1:3000 && npm run dev\"",
     "prepare:resources": "node scripts/prepare-resources.mjs",
     "pack": "npm run build && npm run prepare:resources && npx electron-builder --dir --config electron-builder.json",
-    "dist": "npm run build && npm run prepare:resources && npx electron-builder --config electron-builder.json"
+    "dist": "npm run build && npm run prepare:resources && npx electron-builder --config electron-builder.json",
+    "test": "vitest run"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
@@ -24,6 +25,7 @@
     "electron-builder": "^25.1.8",
     "electron-vite": "^2.3.0",
     "typescript": "^5.7.0",
+    "vitest": "^2.1.9",
     "wait-on": "^8.0.1"
   }
 }

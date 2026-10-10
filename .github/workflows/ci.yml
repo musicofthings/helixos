@@ -103,4 +103,5 @@ jobs:
         working-directory: apps/desktop
         run: |
           npm run typecheck
+          npm test
           npm run build
