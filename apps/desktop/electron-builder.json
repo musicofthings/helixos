@@ -41,12 +41,12 @@
   "publish": [
     {
       "provider": "generic",
-      "url": "https://releases.helixos.example/desktop"
+      "url": "https://releases.helixos.dev/desktop"
     }
   ],
   "mac": {
     "category": "public.app-category.productivity",
-    "target": ["dir", "dmg"],
+    "target": ["dir", "dmg", "zip"],
     "hardenedRuntime": true,
     "gatekeeperAssess": false,
     "entitlements": "build/entitlements.mac.plist",

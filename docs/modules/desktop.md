@@ -96,7 +96,11 @@ CI builds are **unsigned / not Apple-notarized**. First launch may require allow
 
 ## Auto-update And Code Signing
 
-Packaged builds include `electron-updater`. The publish URL in `electron-builder.json` is still a placeholder (`releases.helixos.example`); wire it to GitHub Releases when notarized auto-update is ready. Until then, disable checks locally with `HELIX_DISABLE_AUTOUPDATE=1` (CI release workflow sets this during the build).
+Packaged builds include `electron-updater`, configured in `electron-builder.json` with the generic provider at `https://releases.helixos.dev/desktop`. On launch a packaged app requests `latest-mac.yml` from that URL and downloads the `.zip` it names (the macOS target list includes `zip` for this reason; the DMG is for first install only).
+
+The release workflow stages `latest-mac.yml`, `*-mac.zip` and `*-mac.zip.blockmap` next to the DMG in the GitHub Release and fails if the feed file references a file that was not staged. **Publishing the update is a separate step:** copy those three files to `https://releases.helixos.dev/desktop/` (the workflow does not upload to that host).
+
+macOS updates require a **signed** app. CI builds are currently unsigned (`CSC_IDENTITY_AUTO_DISCOVERY=false`), so installed unsigned builds will log an updater error rather than update until signing and notarization credentials are configured. `HELIX_DISABLE_AUTOUPDATE=1` disables update checks at runtime; note the release workflow sets it only for the *build* step, so it does not disable updates in the shipped app.
 
 Environment controls:
 

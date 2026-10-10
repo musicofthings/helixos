@@ -74,9 +74,22 @@ jobs:
             exit 1
           fi
           cp "$DMG" "release-assets/HelixOS-mac-x64.dmg"
-          # electron-updater metadata when present
+          # electron-updater feed files. The zip keeps its original name because
+          # latest-mac.yml references it by name; the blockmap enables delta updates.
+          # Upload these three to https://releases.helixos.dev/desktop/ to ship an update.
           if [ -f apps/desktop/release/latest-mac.yml ]; then
             cp apps/desktop/release/latest-mac.yml release-assets/
+            find apps/desktop/release -maxdepth 1 \( -name '*-mac.zip' -o -name '*-mac.zip.blockmap' \) -type f -exec cp {} release-assets/ \;
+            # Fail if the feed points at a file we did not stage.
+            for referenced in $(grep -E '^ *(- )?(path|url):' release-assets/latest-mac.yml | sed -E 's/^ *(- )?(path|url): *//' | sort -u); do
+              if [ ! -f "release-assets/$referenced" ]; then
+                echo "latest-mac.yml references $referenced, which was not staged" >&2
+                ls -la apps/desktop/release release-assets || true
+                exit 1
+              fi
+            done
+          else
+            echo "::warning::latest-mac.yml was not produced; auto-update feed files are missing from this release"
           fi
           ls -la release-assets
 
