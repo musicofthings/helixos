@@ -118,3 +118,19 @@ jobs:
             Website: https://musicofthings.github.io/helixos/
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish auto-update feed to releases.helixos.dev (Cloudflare R2)
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          R2_BUCKET: ${{ secrets.R2_RELEASES_BUCKET }}
+        run: |
+          if [ -z "$CLOUDFLARE_API_TOKEN" ] || [ -z "$CLOUDFLARE_ACCOUNT_ID" ] || [ -z "$R2_BUCKET" ]; then
+            echo "::warning::R2 secrets (CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, R2_RELEASES_BUCKET) are not set; skipping auto-update feed publish"
+            exit 0
+          fi
+          if [ ! -f release-assets/latest-mac.yml ]; then
+            echo "::warning::No latest-mac.yml was staged; skipping auto-update feed publish"
+            exit 0
+          fi
+          bash scripts/publish-update-feed.sh release-assets

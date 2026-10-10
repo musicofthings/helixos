@@ -98,7 +98,15 @@ CI builds are **unsigned / not Apple-notarized**. First launch may require allow
 
 Packaged builds include `electron-updater`, configured in `electron-builder.json` with the generic provider at `https://releases.helixos.dev/desktop`. On launch a packaged app requests `latest-mac.yml` from that URL and downloads the `.zip` it names (the macOS target list includes `zip` for this reason; the DMG is for first install only).
 
-The release workflow stages `latest-mac.yml`, `*-mac.zip` and `*-mac.zip.blockmap` next to the DMG in the GitHub Release and fails if the feed file references a file that was not staged. **Publishing the update is a separate step:** copy those three files to `https://releases.helixos.dev/desktop/` (the workflow does not upload to that host).
+The release workflow stages `latest-mac.yml`, `*-mac.zip` and `*-mac.zip.blockmap` next to the DMG in the GitHub Release and fails if the feed file references a file that was not staged. After the GitHub Release is created, the workflow runs `scripts/publish-update-feed.sh`, which uploads the feed to the Cloudflare R2 bucket behind `releases.helixos.dev` under the `desktop/` key prefix: the zip and blockmap first (immutable cache headers), `latest-mac.yml` last (`no-cache`), so a client never reads a feed that points at a missing file. It then fetches `https://releases.helixos.dev/desktop/latest-mac.yml` and fails the job if the public copy differs from what was uploaded. The step is skipped with a warning when the secrets below are absent.
+
+| GitHub secret | Value |
+| --- | --- |
+| `CLOUDFLARE_API_TOKEN` | API token with *Workers R2 Storage: Edit* on the account |
+| `CLOUDFLARE_ACCOUNT_ID` | Cloudflare account ID |
+| `R2_RELEASES_BUCKET` | Name of the bucket served at `releases.helixos.dev` |
+
+This assumes the bucket's custom domain serves the bucket root, so key `desktop/latest-mac.yml` is `https://releases.helixos.dev/desktop/latest-mac.yml`. Preview what would be uploaded without credentials: `DRY_RUN=1 scripts/publish-update-feed.sh <assets-dir>`.
 
 macOS updates require a **signed** app. CI builds are currently unsigned (`CSC_IDENTITY_AUTO_DISCOVERY=false`), so installed unsigned builds will log an updater error rather than update until signing and notarization credentials are configured. `HELIX_DISABLE_AUTOUPDATE=1` disables update checks at runtime; note the release workflow sets it only for the *build* step, so it does not disable updates in the shipped app.
 
