@@ -82,11 +82,12 @@ jobs:
       - name: Install
         working-directory: apps/web
         run: npm ci
-      - name: Typecheck, lint, build
+      - name: Typecheck, lint, test, build
         working-directory: apps/web
         run: |
           npm run typecheck
           npm run lint
+          npm test
           npm run build
 
   desktop:
