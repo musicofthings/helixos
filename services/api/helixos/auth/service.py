@@ -10,6 +10,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from helixos.auth.schemas import Actor, Organization
 from helixos.errors import api_error
+from helixos.observability import bind
 
 bearer_scheme = HTTPBearer(auto_error=False)
 
@@ -130,6 +131,7 @@ def get_current_actor(
         raise api_error(
             status_code=401, code="unauthorized", message="Bearer token is invalid"
         )
+    bind(actor=actor.subject)
     return actor
 
 

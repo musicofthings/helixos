@@ -22,6 +22,7 @@ Rules for adding one:
 
 from __future__ import annotations
 
+import logging
 import sys
 from collections.abc import Callable
 from datetime import datetime, timezone
@@ -41,6 +42,8 @@ from sqlalchemy import (
 from sqlalchemy.engine import Connection, Engine
 
 from helixos.db.base import Base
+
+logger = logging.getLogger("helixos.db.migrations")
 
 MigrationFn = Callable[[Connection, Operations], None]
 
@@ -142,6 +145,7 @@ def upgrade(
                 )
             )
             applied_now.append(version)
+            logger.info("migration applied", extra={"version": version})
     return applied_now
 
 

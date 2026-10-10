@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import logging
 import os
+from uuid import uuid4
 from typing import Any
 
 import httpx
@@ -13,7 +15,11 @@ from helixos.audit.service import audit_service
 from helixos.auth.schemas import Actor
 from helixos.auth.service import organization_service
 from helixos.errors import api_error
+from helixos.observability import bind
 from helixos.mcp.schemas import ConnectorJobRequest, ConnectorJobResult
+
+
+logger = logging.getLogger("helixos.mcp")
 
 
 class MCPBridgeClient:
@@ -39,6 +45,13 @@ class MCPBridgeClient:
         """Dispatch a connector tool call through the desktop bridge."""
         organization_id = request.organization_id
         organization_service.require_access(actor, organization_id)
+
+        job_id = f"job_{uuid4().hex[:16]}"
+        bind(job_id=job_id)
+        logger.info(
+            "connector job dispatching",
+            extra={"connector_id": request.connector_id, "tool": request.tool},
+        )
 
         if not self._bridge_url:
             raise api_error(
@@ -72,6 +85,7 @@ class MCPBridgeClient:
                     url, json={"arguments": request.arguments}, headers=headers
                 )
         except httpx.HTTPError as exc:
+            logger.error("connector bridge unreachable", extra={"reason": str(exc)})
             await run_in_threadpool(
                 audit_service.record,
                 organization_id=organization_id,

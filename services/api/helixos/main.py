@@ -9,6 +9,11 @@ from helixos.audit.router import router as audit_router
 from helixos.audit.service import audit_service, build_audit_store
 from helixos.auth.router import router as auth_router
 from helixos.db.session import init_db
+from helixos.observability import (
+    REQUEST_ID_HEADER,
+    RequestContextMiddleware,
+    configure_logging,
+)
 from helixos.pagination import PAGINATION_HEADERS
 from helixos.db.settings import get_database_settings
 from helixos.modules.router import router as modules_router
@@ -21,6 +26,7 @@ from helixos.errors import http_exception_handler
 
 def create_app() -> FastAPI:
     """Create and configure the HelixOS API application."""
+    configure_logging()
     db_settings = get_database_settings()
     if db_settings.is_configured:
         init_db(db_settings)
@@ -34,6 +40,8 @@ def create_app() -> FastAPI:
         description="AI-native laboratory management and molecular biology platform.",
     )
 
+    # Added first = innermost, so CORS still wraps error responses it produces.
+    app.add_middleware(RequestContextMiddleware)
     app.add_middleware(
         CORSMiddleware,
         # Dev web (:3000) plus packaged Electron static UI (ephemeral loopback port).
@@ -41,7 +49,7 @@ def create_app() -> FastAPI:
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
-        expose_headers=PAGINATION_HEADERS,
+        expose_headers=[*PAGINATION_HEADERS, REQUEST_ID_HEADER],
     )
 
     @app.get("/health", tags=["system"])

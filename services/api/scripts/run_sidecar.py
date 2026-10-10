@@ -16,6 +16,8 @@ def main() -> None:
         host="127.0.0.1",
         port=port,
         log_level=os.getenv("HELIX_LOG_LEVEL", "info"),
+        # helixos.access emits one structured line per request with a request_id.
+        access_log=False,
     )
 
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 from collections import OrderedDict
 from collections.abc import AsyncIterator
 from datetime import datetime, timezone
@@ -18,6 +19,9 @@ from helixos.auth.schemas import Actor
 from helixos.auth.service import organization_service
 from helixos.eln.service import experiment_service
 from helixos.errors import api_error
+from helixos.observability import bind
+
+logger = logging.getLogger("helixos.ai")
 
 # In-memory retention caps: oldest sessions/runs are evicted first.
 MAX_RETAINED_SESSIONS = 1_000
@@ -85,6 +89,8 @@ class AgentService:
         session = self.authorize_session(session_id, actor)
 
         run = AgentRunRecord.create(session_id, message)
+        bind(run_id=run.id)
+        logger.info("agent run started", extra={"session_id": session_id})
         self._runs[run.id] = run
         self._evict(self._runs, MAX_RETAINED_RUNS)
         run.status = AgentRunStatus.RUNNING
@@ -116,6 +122,7 @@ class AgentService:
                 yield frame
             run.status = AgentRunStatus.COMPLETED
             run.completed_at = datetime.now(timezone.utc)
+            logger.info("agent run completed", extra={"tokens": run.token_count})
             # Audit before announcing completion so a client that sees `done`
             # can rely on the completion event being durable.
             await run_in_threadpool(
@@ -135,11 +142,13 @@ class AgentService:
             # Client disconnected mid-stream: don't leave the run RUNNING.
             run.status = AgentRunStatus.CANCELLED
             run.completed_at = datetime.now(timezone.utc)
+            logger.warning("agent run cancelled", extra={"tokens": run.token_count})
             self._record_cancellation_best_effort(session.organization_id, actor, run)
             raise
         except Exception as exc:  # noqa: BLE001 - surface agent failures as SSE errors
             run.status = AgentRunStatus.FAILED
             run.error = str(exc)
+            logger.error("agent run failed", exc_info=True)
             await run_in_threadpool(
                 audit_service.record,
                 organization_id=session.organization_id,

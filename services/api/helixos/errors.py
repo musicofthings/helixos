@@ -6,6 +6,8 @@ from fastapi import HTTPException, Request
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from helixos.observability import current_request_id
+
 
 def api_error(status_code: int, code: str, message: str, details: dict[str, Any] | None = None) -> HTTPException:
     """Create an HTTP exception that renders through the stable error envelope."""
@@ -29,6 +31,10 @@ async def http_exception_handler(_request: Request, exc: StarletteHTTPException)
             "message": str(exc.detail),
             "details": {},
         }
+
+    request_id = current_request_id()
+    if request_id is not None:
+        payload = {**payload, "request_id": request_id}
 
     return JSONResponse(
         status_code=exc.status_code,

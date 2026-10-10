@@ -92,3 +92,9 @@ To change the schema, append a `(version, fn)` entry to `MIGRATIONS` (never edit
 ELN list endpoints (`workspaces`, `projects`, `protocols`, `experiments`, experiment `versions`, `samples`, sample `datasets`) accept `limit` (1–500, default 100) and `offset` (default 0). Responses remain plain JSON arrays; page metadata is in headers: `X-Total-Count` always, and `X-Next-Offset` while more items remain (CORS exposes both). `@helixos/api-client` list methods follow `X-Next-Offset` automatically (500 per request) and return the full list.
 
 Slicing happens after the service builds the visible list (it merges organization and shared-workspace access), so this bounds response size, not database reads. Pushing limits into the stores is a follow-up.
+
+## Logging and request IDs
+
+The API logs one JSON object per line to stderr (`HELIX_LOG_FORMAT=text` for readable dev output, `HELIX_LOG_LEVEL` for the level). Each request gets a `request_id` — an inbound `X-Request-ID` matching `[A-Za-z0-9._-]{1,64}` is honored, otherwise one is generated — returned in the `X-Request-ID` response header (exposed via CORS) and in `error.request_id` of every error envelope. All log records emitted while handling the request, including threadpool work, carry `request_id` and, once authenticated, `actor`. Agent runs add `run_id`, connector jobs add `job_id`, and `helixos.access` logs method, path (never the query string), status and `duration_ms`; `/health` logs at debug. Unhandled exceptions are logged with a traceback and returned as a generic `internal_error` envelope. The desktop sidecar runs uvicorn with its own access log off.
+
+Request IDs are not written into audit events (they would change hash-chained payloads); correlate through `resource_id` and timestamps.

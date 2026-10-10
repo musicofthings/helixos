@@ -3,6 +3,7 @@
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
+import logging
 import random
 import time
 from typing import TypeVar
@@ -15,6 +16,8 @@ from sqlalchemy.orm import Session, sessionmaker
 from helixos.db.settings import DatabaseSettings, get_database_settings
 
 T = TypeVar("T")
+
+logger = logging.getLogger("helixos.db")
 
 _engine: Engine | None = None
 _session_factory: sessionmaker[Session] | None = None
@@ -131,7 +134,12 @@ def run_atomic(
                 return operation()
         except (IntegrityError, OperationalError) as exc:
             last_error = exc
+            logger.warning(
+                "transaction conflict, retrying",
+                extra={"attempt": attempt + 1, "error": type(exc).__name__},
+            )
             time.sleep(random.uniform(0, min(backoff_base * (2**attempt), backoff_max)))
+    logger.error("transaction failed after retries", extra={"attempts": attempts})
     raise RuntimeError("Transaction failed after retries") from last_error
 
 
