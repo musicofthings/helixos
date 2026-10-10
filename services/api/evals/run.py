@@ -346,8 +346,8 @@ def smoke(r: Runner, server: Server | None) -> None:
             {"id": "3", "method": "tools/call", "params": {"name": "analyze_sequence", "arguments": {"sequence": 123}}},
             {"id": "4", "method": "tools/call", "params": {"name": "analyze_sequence", "arguments": {"sequence": "ACGT"}}},
         ]
-        out = sp.run([sys.executable, str(script)], input="\n".join(json.dumps(l) for l in lines) + "\n", capture_output=True, text=True, timeout=20)
-        replies = {json.loads(l)["id"]: json.loads(l) for l in out.stdout.splitlines()}
+        out = sp.run([sys.executable, str(script)], input="\n".join(json.dumps(line) for line in lines) + "\n", capture_output=True, text=True, timeout=20)
+        replies = {json.loads(row)["id"]: json.loads(row) for row in out.stdout.splitlines()}
         expect(replies["2"]["result"]["gc_percent"] == 50.0, replies["2"])
         expect("error" in replies["3"], "malformed args should error, not crash")
         expect(replies["4"]["result"]["length"] == 4, "connector died after bad request")
@@ -360,7 +360,7 @@ def smoke(r: Runner, server: Server | None) -> None:
         resp = r.req("GET", "/api/v1/workspaces", DEMO, params={"secret": "hunter2"})
         rid = resp.headers["X-Request-ID"]
         time.sleep(0.3)
-        lines = [l for l in server.log_lines() if l.get("request_id") == rid]
+        lines = [entry for entry in server.log_lines() if entry.get("request_id") == rid]
         expect(lines and lines[0]["actor"] == "user_demo_scientist" and lines[0]["status"] == 200, f"access log: {lines}")
         expect("hunter2" not in server.log_path.read_text(), "query string leaked into logs")
 
