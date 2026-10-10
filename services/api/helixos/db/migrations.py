@@ -121,7 +121,6 @@ def upgrade(
         raise RuntimeError("Migrations must have unique, lexically ordered versions")
 
     applied_now: list[str] = []
-    _version_metadata.create_all(engine)
     for version, fn in plan:
         with engine.begin() as connection:
             if connection.dialect.name == "postgresql":
@@ -129,6 +128,8 @@ def upgrade(
                     text("SELECT pg_advisory_xact_lock(:key)"),
                     {"key": _ADVISORY_LOCK_KEY},
                 )
+            # Under the lock so concurrent starters cannot race the CREATE TABLE.
+            _version_metadata.create_all(connection)
             already = connection.execute(
                 select(_versions.c.version).where(_versions.c.version == version)
             ).first()

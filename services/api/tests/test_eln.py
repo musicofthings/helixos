@@ -8,10 +8,12 @@ storage contract is verified for both backends.
 import pytest
 from fastapi.testclient import TestClient
 
+from backends import ELN_CLIENT_FIXTURES
+
 ORG_DEMO_HEADERS = {"Authorization": "Bearer org-demo-token"}
 ADMIN_HEADERS = {"Authorization": "Bearer demo-admin-token"}
 
-CLIENT_FIXTURES = ["memory_client", "sqlite_client"]
+CLIENT_FIXTURES = ELN_CLIENT_FIXTURES
 
 
 @pytest.fixture
