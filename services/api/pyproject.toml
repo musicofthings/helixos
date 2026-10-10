@@ -26,6 +26,10 @@ vertex = [
   "google-genai>=1.0.0"
 ]
 
+[tool.setuptools.packages.find]
+# evals/, scripts/ and tests/ are tooling, not part of the installed package.
+include = ["helixos*"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
