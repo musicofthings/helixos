@@ -86,3 +86,9 @@ HELIX_DATABASE_URL=... python -m helixos.db.migrations upgrade
 ```
 
 To change the schema, append a `(version, fn)` entry to `MIGRATIONS` (never edit an applied one) and use `op.batch_alter_table` for anything SQLite cannot `ALTER`. `0001_baseline` creates tables from the current ORM models, so later migrations must be idempotent (`column_exists` / `index_exists`). Databases created before versioning are adopted by the baseline automatically.
+
+## List pagination
+
+ELN list endpoints (`workspaces`, `projects`, `protocols`, `experiments`, experiment `versions`, `samples`, sample `datasets`) accept `limit` (1–500, default 100) and `offset` (default 0). Responses remain plain JSON arrays; page metadata is in headers: `X-Total-Count` always, and `X-Next-Offset` while more items remain (CORS exposes both). `@helixos/api-client` list methods follow `X-Next-Offset` automatically (500 per request) and return the full list.
+
+Slicing happens after the service builds the visible list (it merges organization and shared-workspace access), so this bounds response size, not database reads. Pushing limits into the stores is a follow-up.

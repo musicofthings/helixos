@@ -1,9 +1,10 @@
 """ELN API routes for the workspace -> project -> experiment -> sample -> dataset tree."""
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Response
 
 from helixos.auth.schemas import Actor
 from helixos.auth.service import get_current_actor
+from helixos.pagination import PageParams, page_params, paginate
 from helixos.eln.schemas import (
     Dataset,
     DatasetCreate,
@@ -56,11 +57,14 @@ def create_workspace(
 
 @router.get("/workspaces", response_model=list[Workspace])
 def list_workspaces(
+    response: Response,
     organization_id: str | None = Query(default=None),
+    page: PageParams = Depends(page_params),
     actor: Actor = Depends(get_current_actor),
 ) -> list[Workspace]:
     """List workspaces visible to the caller."""
-    return eln_service.list_workspaces(actor=actor, organization_id=organization_id)
+    items = eln_service.list_workspaces(actor=actor, organization_id=organization_id)
+    return paginate(items, page, response)
 
 
 @router.post("/workspaces/seed-defaults", response_model=list[Workspace])
@@ -181,14 +185,17 @@ def create_project(
 
 @router.get("/projects", response_model=list[Project])
 def list_projects(
+    response: Response,
     organization_id: str | None = Query(default=None),
     workspace_id: str | None = Query(default=None),
+    page: PageParams = Depends(page_params),
     actor: Actor = Depends(get_current_actor),
 ) -> list[Project]:
     """List projects, optionally filtered by workspace."""
-    return eln_service.list_projects(
+    items = eln_service.list_projects(
         actor=actor, organization_id=organization_id, workspace_id=workspace_id
     )
+    return paginate(items, page, response)
 
 
 @router.get("/projects/{project_id}", response_model=Project)
@@ -234,14 +241,17 @@ def import_protocol(
 
 @router.get("/protocols", response_model=list[Protocol])
 def list_protocols(
+    response: Response,
     organization_id: str | None = Query(default=None),
     workspace_id: str | None = Query(default=None),
+    page: PageParams = Depends(page_params),
     actor: Actor = Depends(get_current_actor),
 ) -> list[Protocol]:
     """List protocols, optionally filtered by workspace."""
-    return eln_service.list_protocols(
+    items = eln_service.list_protocols(
         actor=actor, organization_id=organization_id, workspace_id=workspace_id
     )
+    return paginate(items, page, response)
 
 
 @router.get("/protocols/{protocol_id}", response_model=Protocol)
@@ -279,14 +289,17 @@ def create_experiment(
 
 @router.get("/experiments", response_model=list[Experiment])
 def list_experiments(
+    response: Response,
     organization_id: str | None = Query(default=None),
     project_id: str | None = Query(default=None),
+    page: PageParams = Depends(page_params),
     actor: Actor = Depends(get_current_actor),
 ) -> list[Experiment]:
     """List experiments visible to the caller."""
-    return eln_service.list_experiments(
+    items = eln_service.list_experiments(
         actor=actor, organization_id=organization_id, project_id=project_id
     )
+    return paginate(items, page, response)
 
 
 @router.get("/experiments/{experiment_id}", response_model=Experiment)
@@ -323,10 +336,14 @@ def commit_experiment_version(
     "/experiments/{experiment_id}/versions", response_model=list[ExperimentVersion]
 )
 def list_experiment_versions(
-    experiment_id: str, actor: Actor = Depends(get_current_actor)
+    experiment_id: str,
+    response: Response,
+    page: PageParams = Depends(page_params),
+    actor: Actor = Depends(get_current_actor),
 ) -> list[ExperimentVersion]:
     """List the version history for an experiment."""
-    return eln_service.list_versions(experiment_id, actor=actor)
+    items = eln_service.list_versions(experiment_id, actor=actor)
+    return paginate(items, page, response)
 
 
 @router.get(
@@ -369,10 +386,14 @@ def create_sample(
 
 @router.get("/experiments/{experiment_id}/samples", response_model=list[Sample])
 def list_samples(
-    experiment_id: str, actor: Actor = Depends(get_current_actor)
+    experiment_id: str,
+    response: Response,
+    page: PageParams = Depends(page_params),
+    actor: Actor = Depends(get_current_actor),
 ) -> list[Sample]:
     """List samples for an experiment."""
-    return eln_service.list_samples(experiment_id, actor=actor)
+    items = eln_service.list_samples(experiment_id, actor=actor)
+    return paginate(items, page, response)
 
 
 @router.get("/samples/{sample_id}", response_model=Sample)
@@ -410,10 +431,14 @@ def create_dataset(
 
 @router.get("/samples/{sample_id}/datasets", response_model=list[Dataset])
 def list_datasets(
-    sample_id: str, actor: Actor = Depends(get_current_actor)
+    sample_id: str,
+    response: Response,
+    page: PageParams = Depends(page_params),
+    actor: Actor = Depends(get_current_actor),
 ) -> list[Dataset]:
     """List datasets attached to a sample."""
-    return eln_service.list_datasets(sample_id, actor=actor)
+    items = eln_service.list_datasets(sample_id, actor=actor)
+    return paginate(items, page, response)
 
 
 @router.get("/datasets/{dataset_id}", response_model=Dataset)

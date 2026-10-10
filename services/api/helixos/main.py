@@ -9,6 +9,7 @@ from helixos.audit.router import router as audit_router
 from helixos.audit.service import audit_service, build_audit_store
 from helixos.auth.router import router as auth_router
 from helixos.db.session import init_db
+from helixos.pagination import PAGINATION_HEADERS
 from helixos.db.settings import get_database_settings
 from helixos.modules.router import router as modules_router
 from helixos.eln.router import router as eln_router
@@ -40,6 +41,7 @@ def create_app() -> FastAPI:
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
+        expose_headers=PAGINATION_HEADERS,
     )
 
     @app.get("/health", tags=["system"])

@@ -53,6 +53,8 @@ type ApiErrorBody = {
   };
 };
 
+const LIST_PAGE_SIZE = 500;
+
 export class HelixOSClient {
   private readonly baseUrl: string;
   private readonly token: string;
@@ -71,6 +73,34 @@ export class HelixOSClient {
   }
 
   private async request<T>(path: string, init?: RequestInit): Promise<T> {
+    return (await this.requestWithHeaders<T>(path, init)).data;
+  }
+
+  /**
+   * Fetch every page of a paginated list endpoint (the API caps page size and
+   * reports `X-Next-Offset` while more items remain).
+   */
+  private async requestAll<T>(path: string): Promise<T[]> {
+    const items: T[] = [];
+    let offset = 0;
+    const separator = path.includes("?") ? "&" : "?";
+    for (;;) {
+      const { data, headers } = await this.requestWithHeaders<T[]>(
+        `${path}${separator}limit=${LIST_PAGE_SIZE}&offset=${offset}`
+      );
+      items.push(...data);
+      const next = headers.get("X-Next-Offset");
+      if (next === null || data.length === 0) {
+        return items;
+      }
+      offset = Number(next);
+    }
+  }
+
+  private async requestWithHeaders<T>(
+    path: string,
+    init?: RequestInit
+  ): Promise<{ data: T; headers: Headers }> {
     const response = await fetch(`${this.baseUrl}${path}`, {
       ...init,
       headers: this.headers(init?.headers)
@@ -92,10 +122,10 @@ export class HelixOSClient {
     }
 
     if (response.status === 204) {
-      return undefined as T;
+      return { data: undefined as T, headers: response.headers };
     }
 
-    return (await response.json()) as T;
+    return { data: (await response.json()) as T, headers: response.headers };
   }
 
   health(): Promise<{ status: string }> {
@@ -109,7 +139,7 @@ export class HelixOSClient {
   // --- Workspaces --------------------------------------------------------- //
   listWorkspaces(organizationId?: string): Promise<Workspace[]> {
     const query = organizationId ? `?organization_id=${encodeURIComponent(organizationId)}` : "";
-    return this.request(`/api/v1/workspaces${query}`);
+    return this.requestAll(`/api/v1/workspaces${query}`);
   }
 
   createWorkspace(payload: WorkspaceCreate): Promise<Workspace> {
@@ -182,7 +212,7 @@ export class HelixOSClient {
     if (params?.organizationId) search.set("organization_id", params.organizationId);
     if (params?.workspaceId) search.set("workspace_id", params.workspaceId);
     const query = search.toString();
-    return this.request(`/api/v1/projects${query ? `?${query}` : ""}`);
+    return this.requestAll(`/api/v1/projects${query ? `?${query}` : ""}`);
   }
 
   createProject(payload: ProjectCreate): Promise<Project> {
@@ -206,7 +236,7 @@ export class HelixOSClient {
     if (params?.organizationId) search.set("organization_id", params.organizationId);
     if (params?.workspaceId) search.set("workspace_id", params.workspaceId);
     const query = search.toString();
-    return this.request(`/api/v1/protocols${query ? `?${query}` : ""}`);
+    return this.requestAll(`/api/v1/protocols${query ? `?${query}` : ""}`);
   }
 
   createProtocol(payload: ProtocolCreate): Promise<Protocol> {
@@ -241,7 +271,7 @@ export class HelixOSClient {
     if (params?.organizationId) search.set("organization_id", params.organizationId);
     if (params?.projectId) search.set("project_id", params.projectId);
     const query = search.toString();
-    return this.request(`/api/v1/experiments${query ? `?${query}` : ""}`);
+    return this.requestAll(`/api/v1/experiments${query ? `?${query}` : ""}`);
   }
 
   createExperiment(payload: ExperimentCreate): Promise<Experiment> {
@@ -260,7 +290,7 @@ export class HelixOSClient {
   }
 
   listExperimentVersions(experimentId: string): Promise<ExperimentVersion[]> {
-    return this.request(`/api/v1/experiments/${encodeURIComponent(experimentId)}/versions`);
+    return this.requestAll(`/api/v1/experiments/${encodeURIComponent(experimentId)}/versions`);
   }
 
   commitExperimentVersion(experimentId: string, payload: ExperimentVersionCreate): Promise<ExperimentVersion> {
@@ -283,7 +313,7 @@ export class HelixOSClient {
 
   // --- Samples ------------------------------------------------------------ //
   listSamples(experimentId: string): Promise<Sample[]> {
-    return this.request(`/api/v1/experiments/${encodeURIComponent(experimentId)}/samples`);
+    return this.requestAll(`/api/v1/experiments/${encodeURIComponent(experimentId)}/samples`);
   }
 
   createSample(payload: SampleCreate): Promise<Sample> {
@@ -303,7 +333,7 @@ export class HelixOSClient {
 
   // --- Datasets ----------------------------------------------------------- //
   listDatasets(sampleId: string): Promise<Dataset[]> {
-    return this.request(`/api/v1/samples/${encodeURIComponent(sampleId)}/datasets`);
+    return this.requestAll(`/api/v1/samples/${encodeURIComponent(sampleId)}/datasets`);
   }
 
   createDataset(payload: DatasetCreate): Promise<Dataset> {
