@@ -17,7 +17,13 @@ def _clean_dna(sequence: str) -> str:
 
 
 def analyze_sequence(sequence: str) -> dict[str, Any]:
-    """Return basic sequence statistics."""
+    """Return basic sequence statistics.
+
+    Only unambiguous A/C/G/T bases are counted; IUPAC ambiguity codes and any
+    other characters are silently discarded before computing length and GC%.
+    """
+    if not isinstance(sequence, str):
+        raise TypeError("sequence must be a string")
     clean = _clean_dna(sequence)
     if not clean:
         return {"length": 0, "gc_percent": 0.0, "message": "No valid DNA bases found"}
@@ -40,7 +46,11 @@ def handle_request(payload: dict[str, Any]) -> dict[str, Any]:
     """Dispatch a single JSON request."""
     request_id = payload.get("id")
     method = payload.get("method")
-    params = payload.get("params") or {}
+    params = payload.get("params")
+    if params is None:
+        params = {}
+    if not isinstance(params, dict):
+        return {"id": request_id, "error": {"message": "params must be an object"}}
 
     if method == "tools/list":
         return {
@@ -58,16 +68,20 @@ def handle_request(payload: dict[str, Any]) -> dict[str, Any]:
 
     if method == "tools/call":
         tool_name = params.get("name")
-        arguments = params.get("arguments") or {}
-        if tool_name not in TOOLS:
+        arguments = params.get("arguments")
+        if arguments is None:
+            arguments = {}
+        if not isinstance(arguments, dict):
+            return {"id": request_id, "error": {"message": "arguments must be an object"}}
+        if not isinstance(tool_name, str) or tool_name not in TOOLS:
             return {
                 "id": request_id,
                 "error": {"message": f"Unknown tool: {tool_name}"},
             }
         try:
             result = TOOLS[tool_name](**arguments)
-        except TypeError as exc:
-            return {"id": request_id, "error": {"message": str(exc)}}
+        except Exception as exc:  # noqa: BLE001 - one bad request must not kill the connector
+            return {"id": request_id, "error": {"message": f"{type(exc).__name__}: {exc}"}}
         return {"id": request_id, "result": result}
 
     return {"id": request_id, "error": {"message": f"Unsupported method: {method}"}}
@@ -86,7 +100,10 @@ def main() -> None:
         if not isinstance(payload, dict):
             print(json.dumps({"error": {"message": "Request must be an object"}}), flush=True)
             continue
-        response = handle_request(payload)
+        try:
+            response = handle_request(payload)
+        except Exception as exc:  # noqa: BLE001 - final per-request boundary
+            response = {"id": payload.get("id"), "error": {"message": f"Internal error: {exc}"}}
         print(json.dumps(response), flush=True)
 
 

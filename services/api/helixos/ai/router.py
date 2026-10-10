@@ -28,6 +28,8 @@ def create_session(payload: AgentSessionCreate, actor: Actor = Depends(get_curre
 @router.post("/runs")
 async def start_run(payload: AgentRunCreate, actor: Actor = Depends(get_current_actor)) -> StreamingResponse:
     """Start an agent run and stream SSE events."""
+    # Validate before headers are sent so 404/403 use the normal error envelope.
+    agent_service.authorize_session(payload.session_id, actor)
 
     async def event_stream() -> AsyncIterator[str]:
         async for frame in agent_service.stream_run(

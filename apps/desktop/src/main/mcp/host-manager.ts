@@ -31,7 +31,7 @@ export class StdioConnectorHost {
   }
 
   get running(): boolean {
-    return this.process !== null && !this.process.killed;
+    return this.process !== null && this.process.exitCode === null && this.process.signalCode === null;
   }
 
   async start(): Promise<void> {
@@ -84,13 +84,32 @@ export class StdioConnectorHost {
       }
     });
 
-    child.on("exit", (code) => {
+    const failPending = (error: Error) => {
       for (const [, pending] of this.pending) {
         clearTimeout(pending.timer);
-        pending.reject(new Error(`Connector exited with code ${code ?? "unknown"}`));
+        pending.reject(error);
       }
       this.pending.clear();
-      this.process = null;
+    };
+
+    child.on("error", (error) => {
+      console.error(`[mcp:${this.definition.id}] process error`, error);
+      failPending(new Error(`Connector ${this.definition.id} failed: ${error.message}`));
+      if (this.process === child) {
+        this.process = null;
+      }
+    });
+
+    child.on("exit", (code) => {
+      failPending(new Error(`Connector exited with code ${code ?? "unknown"}`));
+      if (this.process === child) {
+        this.process = null;
+      }
+    });
+
+    await new Promise<void>((resolve, reject) => {
+      child.once("spawn", () => resolve());
+      child.once("error", (error) => reject(new Error(`Connector ${this.definition.id} failed to start: ${error.message}`)));
     });
   }
 
@@ -100,15 +119,21 @@ export class StdioConnectorHost {
     }
     const child = this.process;
     this.process = null;
+    if (child.exitCode !== null || child.signalCode !== null) {
+      return;
+    }
     await new Promise<void>((resolve) => {
-      child.once("exit", () => resolve());
-      child.kill("SIGTERM");
-      setTimeout(() => {
-        if (!child.killed) {
+      const timer = setTimeout(() => {
+        if (child.exitCode === null && child.signalCode === null) {
           child.kill("SIGKILL");
         }
         resolve();
       }, 1_000);
+      child.once("exit", () => {
+        clearTimeout(timer);
+        resolve();
+      });
+      child.kill("SIGTERM");
     });
   }
 

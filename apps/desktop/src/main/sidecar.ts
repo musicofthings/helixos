@@ -72,14 +72,22 @@ export class ApiSidecar {
       options.onLog?.(chunk.toString("utf8").trim());
     });
 
+    let spawnError: Error | null = null;
+    child.on("error", (error) => {
+      spawnError = error;
+      options.onLog?.(`Sidecar process error: ${error.message}`);
+    });
+
     child.on("exit", (code) => {
       options.onStatus?.("stopped", `Sidecar exited with code ${code ?? "unknown"}`);
-      this.process = null;
-      this.port = null;
+      if (this.process === child) {
+        this.process = null;
+        this.port = null;
+      }
     });
 
     try {
-      await waitForHealth(buildApiBaseUrl(port));
+      await waitForHealth(buildApiBaseUrl(port), () => spawnError);
       options.onStatus?.("ready", buildApiBaseUrl(port));
       return port;
     } catch (error) {
@@ -103,15 +111,21 @@ export class ApiSidecar {
     this.process = null;
     this.port = null;
 
+    if (child.exitCode !== null || child.signalCode !== null) {
+      return;
+    }
     await new Promise<void>((resolve) => {
-      child.once("exit", () => resolve());
-      child.kill("SIGTERM");
-      setTimeout(() => {
-        if (!child.killed) {
+      const timer = setTimeout(() => {
+        if (child.exitCode === null && child.signalCode === null) {
           child.kill("SIGKILL");
         }
         resolve();
       }, 2_000);
+      child.once("exit", () => {
+        clearTimeout(timer);
+        resolve();
+      });
+      child.kill("SIGTERM");
     });
   }
 }
@@ -148,11 +162,20 @@ function isPortAvailable(port: number): Promise<number | null> {
   });
 }
 
-async function waitForHealth(baseUrl: string, attempts = 40, delayMs = 250): Promise<void> {
+async function waitForHealth(
+  baseUrl: string,
+  failure: () => Error | null,
+  attempts = 40,
+  delayMs = 250
+): Promise<void> {
   const healthUrl = `${baseUrl}/health`;
   let lastError = "Sidecar health check timed out";
 
   for (let attempt = 0; attempt < attempts; attempt += 1) {
+    const spawnFailure = failure();
+    if (spawnFailure) {
+      throw new Error(`Sidecar failed to start: ${spawnFailure.message}`);
+    }
     try {
       const response = await fetch(healthUrl);
       if (response.ok) {

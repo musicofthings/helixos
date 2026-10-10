@@ -53,6 +53,12 @@ class AgentService:
             )
         return session
 
+    def authorize_session(self, session_id: str, actor: Actor):
+        """Resolve a session and verify tenant access before any streaming starts."""
+        session = self.get_session(session_id)
+        organization_service.require_access(actor, session.organization_id)
+        return session
+
     async def stream_run(
         self,
         session_id: str,
@@ -64,8 +70,7 @@ class AgentService:
         sequence_length: int | None = None,
     ) -> AsyncIterator[str]:
         """Execute an agent run and yield SSE frames."""
-        session = self.get_session(session_id)
-        organization_service.require_access(actor, session.organization_id)
+        session = self.authorize_session(session_id, actor)
 
         run = AgentRunRecord.create(session_id, message)
         self._runs[run.id] = run

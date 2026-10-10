@@ -1,0 +1,72 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  api:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install API
+        working-directory: services/api
+        run: pip install -e ".[dev]"
+      - name: Test (memory + SQLite stores)
+        working-directory: services/api
+        run: python -m pytest tests/ -v
+
+  connector:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Test biopython connector
+        working-directory: mcp/servers/biopython_local
+        run: python -m unittest test_server -v
+
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install
+        working-directory: apps/web
+        run: npm ci
+      - name: Typecheck, lint, build
+        working-directory: apps/web
+        run: |
+          npm run typecheck
+          npm run lint
+          npm run build
+
+  desktop:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install
+        working-directory: apps/desktop
+        run: npm ci
+      - name: Typecheck and build
+        working-directory: apps/desktop
+        run: |
+          npm run typecheck
+          npm run build
