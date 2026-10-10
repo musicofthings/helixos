@@ -285,7 +285,15 @@ class SqlElnStore:
         # if it is unchanged. A lost race re-reads and re-checks the use limit.
         for _ in range(_MAX_ATTEMPTS):
             with session_scope() as session:
-                row = session.get(WorkspaceInviteORM, invite.id)
+                # populate_existing: inside a shared unit of work the identity map
+                # may hold a stale row; always re-read the committed state. The row
+                # lock also serializes concurrent acceptors on PostgreSQL.
+                row = session.get(
+                    WorkspaceInviteORM,
+                    invite.id,
+                    populate_existing=True,
+                    with_for_update=True,
+                )
                 if row is None:
                     raise KeyError(invite.id)
                 current = _to_invite(row)

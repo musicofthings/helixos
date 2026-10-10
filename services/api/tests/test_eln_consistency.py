@@ -186,3 +186,49 @@ def test_sqlite_enforces_foreign_keys(sqlite_client) -> None:
 
     with session_scope() as session:
         assert session.execute(text("PRAGMA foreign_keys")).scalar() == 1
+
+
+def test_invite_accept_refreshes_state_inside_one_transaction(sqlite_client) -> None:
+    """Two acceptances in one unit of work must both see the bumped counter."""
+    from helixos.db.session import unit_of_work
+
+    workspace = _qc_workspace(sqlite_client)
+    token = _invite(sqlite_client, workspace["id"], role="viewer", max_uses=2)
+    store = eln_service._store
+    invite = store.get_invite_by_token(token)
+
+    with unit_of_work():
+        store.accept_invite(invite, None)
+        store.accept_invite(invite, None)
+
+    assert store.get_invite(invite.id).accepted_count == 2
+    with pytest.raises(InviteUnavailableError):
+        store.accept_invite(invite, None)
+
+
+def test_invite_accept_rereads_row_changed_outside_identity_map(sqlite_client) -> None:
+    """Simulates another transaction bumping the counter after this session cached
+    the row (READ COMMITTED on PostgreSQL): the retry must re-read, not reuse it."""
+    from sqlalchemy import update
+
+    from helixos.db.session import session_scope, unit_of_work
+    from helixos.eln.orm import WorkspaceInviteORM
+
+    workspace = _qc_workspace(sqlite_client)
+    token = _invite(sqlite_client, workspace["id"], role="viewer", max_uses=3)
+    store = eln_service._store
+    invite = store.get_invite_by_token(token)
+
+    with unit_of_work():
+        with session_scope() as session:
+            session.get(WorkspaceInviteORM, invite.id)  # cache the row at count 0
+            session.execute(
+                update(WorkspaceInviteORM)
+                .where(WorkspaceInviteORM.id == invite.id)
+                .values(accepted_count=1)
+                .execution_options(synchronize_session=False)
+            )
+        updated, _ = store.accept_invite(invite, None)
+
+    assert updated.accepted_count == 2
+    assert store.get_invite(invite.id).accepted_count == 2
