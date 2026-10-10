@@ -1,6 +1,6 @@
 # Audit Trail
 
-The audit module stores immutable, hash-chained events for regulated actions across [AI](ai.md) and [MCP](mcp.md) workflows.
+The audit module stores immutable, hash-chained events for regulated actions across [ELN](eln.md), [AI](ai.md) and [MCP](mcp.md) workflows.
 
 **Related:** [auth.md](auth.md) · [ai.md](ai.md) · [mcp.md](mcp.md) · [SYSTEM_ARCHITECTURE.md](../../SYSTEM_ARCHITECTURE.md)
 
@@ -11,7 +11,8 @@ The audit module stores immutable, hash-chained events for regulated actions acr
 | `ai.session_created` | AI session create |
 | `ai.run_started` | Agent run begin |
 | `ai.tool_call` | Agent tool invocation |
-| `ai.run_completed` / `ai.run_failed` | Agent run end |
+| `ai.run_completed` / `ai.run_failed` / `ai.run_cancelled` | Agent run end (the SSE `done` frame is sent after `ai.run_completed` is written; `run_cancelled` is recorded when the client disconnects) |
+| `eln.*` | ELN mutations: workspaces, sharing/invites, projects, protocols, experiments, version status changes, samples, datasets |
 | `mcp.job_started` / `mcp.job_completed` / `mcp.job_failed` | MCP job dispatch |
 
 ## User Surface
@@ -26,6 +27,8 @@ The audit module stores immutable, hash-chained events for regulated actions acr
 | In-memory | CI and API dev without `HELIX_DATABASE_URL` |
 | SQLite | Local dev (`.data/helixos-dev.db`) and [desktop](desktop.md) |
 | PostgreSQL | Server deployments via docker-compose |
+
+ELN events are recorded for the workspace-authorized actor, who may belong to a different organization than the workspace (invited collaborators); the event lands in the workspace organization's chain. On SQL stores an ELN mutation and its audit event commit in one transaction (`helixos.db.session.unit_of_work`), retried as a whole on chain-head collisions, so an audit failure rolls the mutation back. The in-memory store has no rollback and does not provide this guarantee. AI and MCP events are still appended in their own transactions.
 
 Each organization maintains its own hash chain. Every event stores `sequence_number`, `previous_hash`, and `event_hash`.
 

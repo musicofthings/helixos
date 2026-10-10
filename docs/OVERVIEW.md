@@ -7,10 +7,10 @@ HelixOS is an AI-native laboratory platform starter kit. It targets molecular bi
 | Capability | User surface | Backend | Persistence |
 | --- | --- | --- | --- |
 | Organizations & auth | Web / desktop | `helixos.auth` | In-memory demo actors |
-| Experiment drafts (ELN) | Workspace → Experiments | `helixos.eln` | In-memory |
+| ELN hierarchy (workspaces, projects, experiments, versions, samples, datasets, sharing) | Workspace shell | `helixos.eln` | Memory / SQLite / Postgres; audited mutations commit atomically with their audit event on SQL stores |
 | Sequence metadata | Workspace → Sequences | `helixos.molecular` | In-memory demo data |
 | Inventory UI | Workspace → Inventory | — | Client state only (no API yet) |
-| AI lab copilot | Agent panel | `helixos.ai` | Sessions in memory; traces in audit store |
+| AI lab copilot | Agent panel | `helixos.ai` | Sessions/runs in memory (bounded, oldest evicted); traces in audit store |
 | MCP BioPython local | Connectors tab | `helixos.mcp` + desktop bridge | Job results ephemeral; audit persisted |
 | Hash-chained audit | Sidebar trail + API | `helixos.audit` | Memory / SQLite / Postgres |
 | Desktop shell | Electron app | `apps/desktop` + API sidecar | SQLite audit in dev/desktop |
