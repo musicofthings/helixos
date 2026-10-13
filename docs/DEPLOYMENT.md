@@ -126,6 +126,9 @@ Infrastructure is Terraform in [`deploy/terraform`](../deploy/terraform) (Cloud 
 
    ```bash
    cd deploy/terraform
+   # If your gcloud application-default credentials have a quota project with billing
+   # disabled, Google rejects the state reads; point them at this project instead:
+   export GOOGLE_BILLING_PROJECT=<project> GOOGLE_USER_PROJECT_OVERRIDE=true GOOGLE_CLOUD_QUOTA_PROJECT=<project>
    terraform init -backend-config="bucket=<state-bucket>" -backend-config="prefix=helixos/staging"
    terraform apply -var-file=staging.tfvars      # no images set yet: creates everything except the services
    ```
@@ -136,8 +139,11 @@ Infrastructure is Terraform in [`deploy/terraform`](../deploy/terraform) (Cloud 
    printf '%s' "$OPENAI_KEY" | gcloud secrets versions add helixos-staging-openai-api-key --data-file=- --project <project>
    ```
 
+   Before the first `terraform init`, the project needs billing linked and three APIs enabled by hand (Terraform cannot enable the API it uses to enable the others): `gcloud services enable serviceusage.googleapis.com cloudresourcemanager.googleapis.com iam.googleapis.com --project <project>`. Cloud SQL takes 10-20 minutes to create the first time.
+
 4. **GitHub environment.** Create environments `staging` and `production` in the repository settings. On `production`, add **required reviewers**. Set each environment's variables from `terraform output github_variables`, plus the public web settings: `OIDC_AUTHORITY`, `OIDC_CLIENT_ID`, `OIDC_AUDIENCE` (and optionally `OIDC_SCOPE`, `OIDC_TOKEN_TYPE`) and `WEB_URL`.
-5. **First images.** The services cannot exist before an image does, so run the *Deploy* workflow manually with `images_only` ticked: it builds and pushes both images and deploys nothing. Put those image URLs (`<IMAGE_REPOSITORY>/api:<tag>`, `/web:<tag>`) in `api_image` / `web_image` in your tfvars and `terraform apply` again; that creates the two services. Until then the automatic staging deploy after CI fails with a message saying so. From now on the pipeline deploys.
+   A staging environment on demo tokens sets `API_TOKEN=org-demo-token` instead of the `OIDC_*` variables; it is compiled into the public web bundle.
+5. **First images.** The services cannot exist before an image does, so run the *Deploy* workflow manually with `images_only` ticked: it builds and pushes both images and deploys nothing. (Equivalent by hand: `docker build` both images with the same build arguments the workflow uses, push them to the registry, and use those tags.) Put those image URLs (`<IMAGE_REPOSITORY>/api:<tag>`, `/web:<tag>`) in `api_image` / `web_image` in your tfvars and `terraform apply` again; that creates the two services. Until then the automatic staging deploy after CI fails with a message saying so. From now on the pipeline deploys.
 6. **Identity provider.** Register the web app's callback URL (the site root, e.g. `https://app.example.com/`) and allowed logout URL with the provider; make sure tokens carry `email` and `email_verified` ([modules/auth.md](modules/auth.md)).
 7. **First organization.** The API image contains the operator CLI; run it against the environment's database, for example through a one-off Cloud Run job or `gcloud run jobs`, or locally through the Cloud SQL Auth Proxy:
 

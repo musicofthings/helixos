@@ -65,12 +65,14 @@ variable "web_domain" {
 # ---- Authentication ----
 variable "oidc_issuer" {
   type        = string
-  description = "OpenID Connect issuer URL; must equal the tokens' iss claim."
+  default     = ""
+  description = "OpenID Connect issuer URL; must equal the tokens' iss claim. Required for production; staging may run on demo tokens alone."
 }
 
 variable "oidc_audience" {
   type        = string
-  description = "Audience the API requires in tokens."
+  default     = ""
+  description = "Audience the API requires in tokens. Required whenever oidc_issuer is set."
 }
 
 variable "enable_demo_tokens" {

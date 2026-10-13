@@ -232,13 +232,12 @@ resource "google_cloud_run_v2_service" "api" {
         name  = "ALLOWED_ORIGINS"
         value = local.web_url
       }
-      env {
-        name  = "HELIX_OIDC_ISSUER"
-        value = var.oidc_issuer
-      }
-      env {
-        name  = "HELIX_OIDC_AUDIENCE"
-        value = var.oidc_audience
+      dynamic "env" {
+        for_each = var.oidc_issuer != "" ? { HELIX_OIDC_ISSUER = var.oidc_issuer, HELIX_OIDC_AUDIENCE = var.oidc_audience } : {}
+        content {
+          name  = env.key
+          value = env.value
+        }
       }
       env {
         name  = "HELIX_AI_PROVIDER"
@@ -329,6 +328,14 @@ resource "google_cloud_run_v2_service" "api" {
 
     # The API refuses to start with a paid provider and no ceiling; fail the plan
     # instead of a deploy.
+    precondition {
+      condition     = var.oidc_issuer == "" || var.oidc_audience != ""
+      error_message = "oidc_audience is required when oidc_issuer is set."
+    }
+    precondition {
+      condition     = var.environment != "production" || var.oidc_issuer != ""
+      error_message = "Production requires oidc_issuer and oidc_audience: it has no other way to authenticate."
+    }
     precondition {
       condition = var.ai_provider == "stub" || (
         var.ai_price_input_usd_per_mtok != "" && var.ai_price_output_usd_per_mtok != "" &&

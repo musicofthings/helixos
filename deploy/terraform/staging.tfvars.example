@@ -4,12 +4,16 @@ project_id        = "helixos-staging"
 environment       = "staging"
 github_repository = "musicofthings/helixos"
 
-oidc_issuer   = "https://YOUR-TENANT.example-idp.com/"
-oidc_audience = "helixos-api"
-
-# Until a real identity provider is wired up, staging can also accept demo tokens.
-enable_demo_tokens = false
+# Until a real identity provider exists, staging runs on the documented demo
+# tokens. The URL is public, so keep real lab data out of such an environment.
+enable_demo_tokens = true
 ai_provider        = "stub"
+
+# Real sign-in (required for production; replaces demo tokens):
+# oidc_issuer   = "https://YOUR-TENANT.example-idp.com/"
+# oidc_audience = "helixos-api"
+
+db_tier = "db-f1-micro" # cheapest; shared CPU, no uptime guarantee
 
 # With a paid provider (ai_provider = "openai" or "vertex") these are required.
 # Copy the prices from the provider's price list; caps are in US dollars.

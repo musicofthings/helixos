@@ -9,7 +9,10 @@ name: Deploy
 # them: `terraform output github_variables`): GCP_PROJECT_ID, GCP_REGION,
 # GCP_WIF_PROVIDER, GCP_DEPLOYER_SA, IMAGE_REPOSITORY, API_SERVICE, WEB_SERVICE,
 # HELIX_API_URL, plus the public web settings OIDC_AUTHORITY, OIDC_CLIENT_ID,
-# OIDC_AUDIENCE (and optionally OIDC_SCOPE, OIDC_TOKEN_TYPE) and WEB_URL.
+# OIDC_AUDIENCE (and optionally OIDC_SCOPE, OIDC_TOKEN_TYPE) and WEB_URL. A staging
+# environment running on demo tokens sets API_TOKEN=org-demo-token instead of the
+# OIDC_* values; it is compiled into the public web bundle, so never put a real
+# credential there.
 # No secrets are used: GCP access is federated and short-lived.
 
 on:
@@ -133,6 +136,7 @@ jobs:
             --build-arg "NEXT_PUBLIC_OIDC_AUDIENCE=${{ vars.OIDC_AUDIENCE }}" \
             --build-arg "NEXT_PUBLIC_OIDC_SCOPE=${{ vars.OIDC_SCOPE }}" \
             --build-arg "NEXT_PUBLIC_OIDC_TOKEN_TYPE=${{ vars.OIDC_TOKEN_TYPE }}" \
+            --build-arg "NEXT_PUBLIC_API_TOKEN=${{ vars.API_TOKEN }}" \
             .
           docker push "${IMAGE_REPOSITORY}/api:${TAG}"
           docker push "${IMAGE_REPOSITORY}/web:${TAG}"
