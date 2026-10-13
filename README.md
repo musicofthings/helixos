@@ -4,7 +4,7 @@ AI-native Laboratory Management & Molecular Biology Platform.
 
 HelixOS combines ELN, molecular biology tooling, AI copilots, MCP connectors, and a hash-chained audit trail in one workspace. It ships as a **browser stack** (Next.js + FastAPI) and a **desktop app** (Electron + local sidecar + MCP bridge).
 
-**Website:** [musicofthings.github.io/helixos](https://musicofthings.github.io/helixos/) — product overview and macOS download.
+**Website:** [helixos.pages.dev](https://helixos.pages.dev/) — product overview, light-pastel default theme, and macOS download.
 
 **Download:** [Latest GitHub Release](https://github.com/musicofthings/helixos/releases/latest) (`HelixOS-mac-x64.dmg`; not Apple-notarized yet).
 
@@ -12,7 +12,7 @@ HelixOS combines ELN, molecular biology tooling, AI copilots, MCP connectors, an
 
 **Resuming work?** Read [SESSION_HANDOVER.md](SESSION_HANDOVER.md) for current state, uncommitted changes, and production next steps.
 
-## Current Status (July 2026)
+## Current Status (August 2026)
 
 Local browser and desktop stacks work end-to-end. The shared web app (`apps/web`) powers both surfaces with a **Slack-style workspace shell**: workspaces are sidebar channels; create/select opens a workspace home; Lab notebook and other tools are scoped to the active workspace.
 
@@ -21,7 +21,7 @@ Local browser and desktop stacks work end-to-end. The shared web app (`apps/web`
 | Browser dev stack | Working (`npm run dev:browser`) |
 | Desktop dev stack | Working (`npm run dev:desktop`) |
 | Packaged desktop (local) | Working (`cd apps/desktop && npm run pack`) — static UI over loopback + API proxy/CORS |
-| Public website | [`apps/site`](apps/site) → GitHub Pages ([docs/SITE.md](docs/SITE.md)) |
+| Public website | [`apps/site`](apps/site) → Cloudflare Pages ([docs/SITE.md](docs/SITE.md)) |
 | Desktop releases | Tag `v*.*.*` → Actions builds macOS DMG → GitHub Releases |
 | Workspace shell | Slack-style channels + workspace home + scoped lab notebook |
 | Workspace share / invites | Working (viewer/editor grants, invite links) |
@@ -46,7 +46,7 @@ Both `npm run dev:browser` and the desktop shell load the same Next.js app:
 ```txt
 apps/web/       Next.js workspace UI (browser + desktop)
 apps/desktop/   Electron shell + sidecar + MCP bridge
-apps/site/      Public landing site (GitHub Pages)
+apps/site/      Public landing site (Cloudflare Pages)
 services/api/   FastAPI backend (helixos.* domains)
 packages/       Shared TypeScript (api-client, types)
 schemas/        JSON Schema contracts
@@ -66,6 +66,13 @@ npm run dev:browser  # API :8000 + web :3000
 npm run dev:desktop  # Electron + sidecar :8765 + MCP :8766 + web :3000
 npm run test:api     # pytest
 ```
+
+## How to use the public site
+
+1. Open [helixos.pages.dev](https://helixos.pages.dev/).
+2. Read the Product, How to use, Traction, and Investors sections.
+3. Use the theme switcher in the header if you want to compare light and dark modes.
+4. Click **Request investor deck** or **Latest desktop release** when you want to go deeper.
 
 Packaged local desktop:
 

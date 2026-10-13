@@ -1,11 +1,6 @@
-name: Deploy landing site
+name: Deploy landing site (legacy GitHub Pages)
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - "apps/site/**"
-      - ".github/workflows/pages.yml"
   workflow_dispatch:
 
 permissions:

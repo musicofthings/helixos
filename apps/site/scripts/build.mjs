@@ -12,8 +12,13 @@ try {
 }
 mkdirSync(dist, { recursive: true });
 
-for (const name of ["index.html", "styles.css", "main.js"]) {
-  cpSync(path.join(root, name), path.join(dist, name));
+for (const name of ["index.html", "styles.css", "main.js", "_headers", "_redirects", "robots.txt"]) {
+  const source = path.join(root, name);
+  try {
+    cpSync(source, path.join(dist, name));
+  } catch {
+    // Optional deploy files may not exist.
+  }
 }
 
 const assetsSrc = path.join(root, "assets");
@@ -24,7 +29,7 @@ try {
   mkdirSync(assetsDest, { recursive: true });
 }
 
-// Helpful for GitHub Pages project sites that still hit /helixos
+// Keep this for the legacy GitHub Pages fallback workflow.
 writeFileSync(path.join(dist, ".nojekyll"), "");
 
 console.log(`Built landing site → ${dist}`);

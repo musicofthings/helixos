@@ -23,7 +23,7 @@ Read these documents in order when onboarding to the platform. Each layer builds
 | Document | What you learn |
 | --- | --- |
 | [modules/desktop.md](modules/desktop.md) | Electron shell, API sidecar, MCP bridge, packaging, releases |
-| [SITE.md](SITE.md) | Public landing site (GitHub Pages) and download links |
+| [SITE.md](SITE.md) | Public landing site (Cloudflare Pages) and download links |
 | [DEPLOYMENT.md](DEPLOYMENT.md) | Environments, startup validation, API image, web proxy |
 | [BETA_LAUNCH_PLAN.md](BETA_LAUNCH_PLAN.md) | Production-readiness gaps and beta sequencing |
 | [modules/auth.md](modules/auth.md) | Organizations, actors, tenant isolation |
