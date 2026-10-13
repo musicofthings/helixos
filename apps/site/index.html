@@ -3,10 +3,10 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>HelixOS — AI-native lab workspace</title>
+    <title>HelixOS — AI-native operating system for modern labs</title>
     <meta
       name="description"
-      content="HelixOS is an AI-native laboratory workspace: Slack-style workspaces, ELN, protocols, MCP connectors, and a local desktop app."
+      content="HelixOS unifies ELN, molecular workflows, AI copilots, and auditable operations in one desktop-first platform for scientific teams."
     />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -14,6 +14,18 @@
       href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,700&family=Manrope:wght@400;500;600;700&display=swap"
       rel="stylesheet"
     />
+    <script>
+      (() => {
+        try {
+          const theme = localStorage.getItem("helixos-theme");
+          if (theme === "dark") {
+            document.documentElement.dataset.theme = "dark";
+          }
+        } catch (error) {
+          // Keep the default light theme when storage is unavailable.
+        }
+      })();
+    </script>
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
@@ -21,98 +33,171 @@
 
     <header class="top">
       <a class="mark" href="./">HelixOS</a>
-      <nav class="top-nav">
-        <a href="#product">Product</a>
-        <a href="#start">Get started</a>
-        <a href="https://github.com/musicofthings/helixos">GitHub</a>
-      </nav>
+      <div class="top-actions">
+        <nav class="top-nav">
+          <a href="#product">Product</a>
+          <a href="#story">Story</a>
+          <a href="#traction">Traction</a>
+          <a href="#investors">Investors</a>
+          <a href="#contact">Contact</a>
+          <a href="https://github.com/musicofthings/helixos">GitHub</a>
+        </nav>
+        <button
+          class="theme-toggle"
+          type="button"
+          aria-label="Switch to dark theme"
+          aria-pressed="false"
+          data-theme-toggle
+        >
+          Light pastel
+        </button>
+      </div>
     </header>
 
     <main>
       <section class="hero" id="top">
+        <figure class="hero-banner">
+          <img
+            src="./assets/images/Meshy_AI_helixos-lab-automation-hero-v3.png"
+            alt="HelixOS hero artwork showing lab automation control surfaces"
+            loading="eager"
+          />
+        </figure>
         <p class="brand">HelixOS</p>
-        <h1>The lab notebook that thinks with you.</h1>
+        <h1>The software layer that controls your lab robots.</h1>
         <p class="lede">
-          Workspaces, experiments, protocols, and local AI connectors in one desktop-first molecular biology platform.
+          Your robots already do the work. HelixOS orchestrates them with protocols, AI reasoning, live experiment state, and audit-grade traceability — so the lab runs as one system.
         </p>
         <div class="cta">
-          <a class="btn primary" href="https://github.com/musicofthings/helixos/releases/latest">
-            Download for macOS
+          <a
+            class="btn primary"
+            href="#contact"
+            data-contact-reason="Investor deck"
+          >
+            Request investor deck
           </a>
-          <a class="btn ghost" href="#start">Run from source</a>
-        </div>
-        <div class="hero-stage" aria-hidden="true">
-          <div class="stage-shell">
-            <aside class="stage-rail">
-              <span class="rail-label">Workspaces</span>
-              <span class="rail-ch active"># molecular-biology</span>
-              <span class="rail-ch"># biochemistry</span>
-              <span class="rail-ch"># microbiology</span>
-              <span class="rail-label tools">Tools</span>
-              <span class="rail-tool">Lab</span>
-              <span class="rail-tool">Protocols</span>
-              <span class="rail-tool">Sequences</span>
-            </aside>
-            <div class="stage-main">
-              <header class="stage-bar">
-                <span>molecular-biology</span>
-                <span class="pill">sidecar ready</span>
-              </header>
-              <div class="stage-body">
-                <p class="stage-kicker">Workspace home</p>
-                <p class="stage-title">Gibson assembly sprint</p>
-                <div class="stage-rows">
-                  <div class="stage-row">Reporter plasmid · draft</div>
-                  <div class="stage-row">Colony PCR screen · active</div>
-                  <div class="stage-row">Protocol · Gibson assembly</div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
+          <a class="btn ghost" href="#product">See product scope</a>
+       </div>
       </section>
 
       <section class="band" id="product">
-        <h2>One workspace for wet-lab truth.</h2>
+        <h2>From disconnected robots to one operating system.</h2>
         <p class="band-lede">
-          HelixOS keeps ELN structure, reusable protocols, sequence tooling, and MCP connectors under a single Slack-style shell — in the browser for development, or as a local desktop app with an API sidecar.
+          HelixOS brings robot fleets, ELN structure, protocol logic, AI decision support, and compliance logging into one control plane for the modern lab.
         </p>
       </section>
 
-      <section class="split">
-        <article>
-          <h3>Workspaces as channels</h3>
-          <p>Switch labs like channels. Each workspace has a home, projects, and a scoped lab notebook.</p>
+      <section class="story-grid" id="story">
+        <article class="story-row">
+          <div class="story-copy">
+            <p class="eyebrow">Robot fleet control</p>
+            <h3>One surface for instruments, queues, and execution.</h3>
+            <p>HelixOS turns separate robots into one operating system, so task routing, handoffs, and live status stay synchronized.</p>
+            <p>The result is a control plane that can run parallel work without losing the state of the lab.</p>
+          </div>
+          <figure class="story-media">
+            <img
+              src="./assets/images/plate_master_robot.png"
+              alt="Lab robot hardware in the HelixOS fleet story"
+              loading="lazy"
+            />
+          </figure>
         </article>
-        <article>
-          <h3>Protocols library</h3>
-          <p>Create, edit, and import protocol shells. Wire live protocols.io fetch as the next step.</p>
+
+        <article class="story-row reverse">
+          <div class="story-copy">
+            <p class="eyebrow">Protocol intelligence</p>
+            <h3>Turn methods into executable workflows.</h3>
+            <p>Define approvals, sequencing, and retries once, then let HelixOS coordinate the work between humans, robots, and analysis systems.</p>
+            <p>That gives the lab a repeatable protocol layer instead of a collection of disconnected checklists.</p>
+          </div>
+          <figure class="story-media">
+            <img
+              src="./assets/images/programmable_bio_hero.png"
+              alt="Protocol and analysis workflow visual for HelixOS"
+              loading="lazy"
+            />
+          </figure>
         </article>
-        <article>
-          <h3>Desktop-local by design</h3>
-          <p>Electron packs the UI with a FastAPI sidecar and MCP bridge so connectors stay on your machine.</p>
-        </article>
-        <article>
-          <h3>Audit-ready trail</h3>
-          <p>Hash-chained audit events for regulated actions — built as a first-class domain, not an afterthought.</p>
+
+        <article class="story-row">
+          <div class="story-copy">
+            <p class="eyebrow">Audit and traceability</p>
+            <h3>Keep a reviewable record for every run.</h3>
+            <p>Every robot action, protocol change, and result lands in a structured system of record for troubleshooting and compliance.</p>
+            <p>That makes HelixOS the software layer investors can trust and operators can actually ship on.</p>
+          </div>
+          <figure class="story-media">
+            <img
+              src="./assets/images/Meshy_AI_helixos-lab-concept.png"
+              alt="HelixOS audit and orchestration concept visual"
+              loading="lazy"
+            />
+          </figure>
         </article>
       </section>
 
-      <section class="band start" id="start">
-        <h2>Get started</h2>
+      <section class="band traction" id="traction">
+        <h2>Why this matters now</h2>
         <p class="band-lede">
-          Prefer a packaged app? Grab the latest macOS build. Prefer hacking on the monorepo? Run the browser stack in two commands.
+          Labs are buying robots, but they still need the software layer that turns hardware into an operating system.
+        </p>
+        <div class="metrics-grid">
+          <article class="metric">
+            <h3>Robot fleets need orchestration</h3>
+            <p>One vendor per instrument does not scale when the lab wants coordinated, multi-step execution.</p>
+          </article>
+          <article class="metric">
+            <h3>Protocols need state</h3>
+            <p>Manual checklists break down once experiments span robots, humans, and asynchronous analysis.</p>
+          </article>
+          <article class="metric">
+            <h3>Audit needs to be native</h3>
+            <p>Regulated science requires a system that records every action without extra admin work.</p>
+          </article>
+        </div>
+      </section>
+
+      <section class="band investors" id="investors">
+        <h2>Investor thesis</h2>
+        <p class="band-lede">
+          We believe the winning lab software company is the control plane for robotics, protocol execution, and scientific reasoning.
         </p>
         <div class="start-grid">
           <div class="start-block">
-            <h3>Download</h3>
-            <p>macOS DMG from GitHub Releases. Builds are not Apple-notarized yet — open via System Settings if Gatekeeper warns.</p>
-            <a class="btn primary small" href="https://github.com/musicofthings/helixos/releases/latest">
-              Latest release
+            <h3>Why now</h3>
+            <p>Labs are installing automation faster than they are unifying it. The missing layer is software that can run the fleet.</p>
+            <a
+              class="btn primary small"
+              href="#contact"
+              data-contact-reason="Investor deck"
+            >
+              Contact founders
             </a>
           </div>
           <div class="start-block">
-            <h3>From source</h3>
+            <h3>What we are raising for</h3>
+            <p>Build the robotics control layer, ship pilot workflows, and prove that HelixOS can operate real lab fleets end-to-end.</p>
+            <p class="hint">Request: strategic seed investors aligned with biotech infrastructure, robotics, and regulated software.</p>
+          </div>
+        </div>
+      </section>
+
+      <section class="band start" id="start">
+        <h2>Run it today</h2>
+        <p class="band-lede">
+          Use the packaged desktop build for local evaluation, or run the monorepo for full development visibility.
+        </p>
+        <div class="start-grid">
+          <div class="start-block">
+            <h3>Download app</h3>
+            <p>macOS DMG from GitHub Releases. Builds are not Apple-notarized yet; allow in System Settings if needed.</p>
+            <a class="btn primary small" href="https://github.com/musicofthings/helixos/releases/latest">
+              Latest desktop release
+            </a>
+          </div>
+          <div class="start-block">
+            <h3>Build from source</h3>
             <pre><code>git clone https://github.com/musicofthings/helixos.git
 cd helixos
 npm run setup
@@ -123,18 +208,79 @@ npm run dev:browser</code></pre>
       </section>
 
       <section class="band docs" id="docs">
-        <h2>Read the docs</h2>
+        <h2>Technical depth</h2>
         <p class="band-lede">
-          Architecture, API contracts, and module deep-dives live in the repository.
+          Architecture, API contracts, and module docs are public for technical due diligence.
         </p>
         <a class="btn ghost" href="https://github.com/musicofthings/helixos#readme">Open README on GitHub</a>
+      </section>
+
+      <section class="band contact" id="contact">
+        <h2>Talk to the team</h2>
+        <p class="band-lede">
+          Request the investor deck, ask about pilots, or reach out for press and partnerships. We reply within one business day.
+        </p>
+        <form
+          class="contact-form"
+          data-contact-form
+          action="https://formspree.io/f/xkjwbjad"
+          method="POST"
+        >
+          <div class="form-row">
+            <label>
+              <span>Name</span>
+              <input type="text" name="name" autocomplete="name" required data-fs-field="name" />
+              <span class="field-error" data-fs-error="name"></span>
+            </label>
+            <label>
+              <span>Email</span>
+              <input type="email" name="email" autocomplete="email" required data-fs-field="email" />
+              <span class="field-error" data-fs-error="email"></span>
+            </label>
+          </div>
+          <div class="form-row">
+            <label>
+              <span>Company</span>
+              <input type="text" name="company" autocomplete="organization" data-fs-field="company" />
+              <span class="field-error" data-fs-error="company"></span>
+            </label>
+            <label>
+              <span>I'm reaching out about</span>
+              <select name="reason" data-contact-reason-select>
+                <option value="Investor deck">Investor deck</option>
+                <option value="Pilot / partnership">Pilot / partnership</option>
+                <option value="Press">Press</option>
+                <option value="General">General</option>
+              </select>
+            </label>
+          </div>
+          <label class="full">
+            <span>Message</span>
+            <textarea name="message" rows="4" required data-fs-field="message"></textarea>
+            <span class="field-error" data-fs-error="message"></span>
+          </label>
+          <input
+            type="text"
+            name="_gotcha"
+            class="hp-field"
+            tabindex="-1"
+            autocomplete="off"
+            aria-hidden="true"
+          />
+          <input type="hidden" name="_subject" value="HelixOS investor site inquiry" />
+          <div class="form-actions">
+            <button type="submit" class="btn primary">Send message</button>
+            <p class="form-status" data-form-status role="status" aria-live="polite"></p>
+          </div>
+        </form>
       </section>
     </main>
 
     <footer class="foot">
-      <span>HelixOS</span>
+      <span>HelixOS · Investor Preview</span>
       <a href="https://github.com/musicofthings/helixos">Source</a>
       <a href="https://github.com/musicofthings/helixos/releases/latest">Releases</a>
+      <a href="#contact">Contact</a>
     </footer>
 
     <script type="module" src="./main.js"></script>
