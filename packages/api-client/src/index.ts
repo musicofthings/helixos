@@ -14,7 +14,12 @@ import type {
   ExperimentStatusUpdate,
   ExperimentVersion,
   ExperimentVersionCreate,
+  MemberAddRequest,
+  MemberAddResult,
   Organization,
+  OrgMember,
+  OrgMembers,
+  OrgRole,
   Project,
   ProjectCreate,
   ProjectUpdate,
@@ -136,6 +141,39 @@ export class HelixOSClient {
 
   listOrganizations(): Promise<Organization[]> {
     return this.request("/api/v1/organizations");
+  }
+
+  // --- Organization members ---------------------------------------------- //
+  listOrganizationMembers(organizationId: string): Promise<OrgMembers> {
+    return this.request(`/api/v1/organizations/${encodeURIComponent(organizationId)}/members`);
+  }
+
+  addOrganizationMember(organizationId: string, payload: MemberAddRequest): Promise<MemberAddResult> {
+    return this.request(`/api/v1/organizations/${encodeURIComponent(organizationId)}/members`, {
+      method: "POST",
+      body: JSON.stringify(payload)
+    });
+  }
+
+  changeMemberRole(organizationId: string, userId: string, role: OrgRole): Promise<OrgMember> {
+    return this.request(
+      `/api/v1/organizations/${encodeURIComponent(organizationId)}/members/${encodeURIComponent(userId)}`,
+      { method: "PATCH", body: JSON.stringify({ role }) }
+    );
+  }
+
+  removeOrganizationMember(organizationId: string, userId: string): Promise<void> {
+    return this.request(
+      `/api/v1/organizations/${encodeURIComponent(organizationId)}/members/${encodeURIComponent(userId)}`,
+      { method: "DELETE" }
+    );
+  }
+
+  revokeMemberInvite(organizationId: string, inviteId: string): Promise<void> {
+    return this.request(
+      `/api/v1/organizations/${encodeURIComponent(organizationId)}/member-invites/${encodeURIComponent(inviteId)}`,
+      { method: "DELETE" }
+    );
   }
 
   // --- Workspaces --------------------------------------------------------- //

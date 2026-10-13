@@ -1,11 +1,52 @@
 export * from "./eln.generated";
 
+export type OrgRole =
+  | "admin"
+  | "pi"
+  | "scientist"
+  | "technician"
+  | "qa_reviewer"
+  | "external_collaborator";
+
 export interface Organization {
   id: string;
   name: string;
   slug: string;
   created_at: string;
   updated_at: string;
+  /** The caller's role in this organization. */
+  role: OrgRole | null;
+}
+
+export interface OrgMember {
+  user_id: string;
+  email: string | null;
+  display_name: string | null;
+  role: OrgRole;
+  joined_at: string;
+}
+
+export interface OrgMemberInvite {
+  id: string;
+  email: string;
+  role: OrgRole;
+  invited_by: string;
+  created_at: string;
+}
+
+export interface OrgMembers {
+  members: OrgMember[];
+  invites: OrgMemberInvite[];
+}
+
+export interface MemberAddRequest {
+  email: string;
+  role: OrgRole;
+}
+
+export interface MemberAddResult {
+  member: OrgMember | null;
+  invite: OrgMemberInvite | null;
 }
 
 export type MoleculeType = "dna" | "rna" | "protein";

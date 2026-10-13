@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type {
   DatasetType,
+  OrgRole,
   SampleStatus,
   SampleType,
   WorkspaceCategory,
@@ -668,4 +669,56 @@ export function useAgentSession(organizationId: string | undefined, enabled = tr
   const retry = useCallback(() => setRetryCount((count) => count + 1), []);
 
   return { sessionId, isPending, error, retry };
+}
+
+// --- Organization members -------------------------------------------------- //
+export function useOrgMembers(organizationId?: string, enabled = true) {
+  return useQuery({
+    queryKey: ["org-members", organizationId],
+    enabled: enabled && Boolean(organizationId),
+    queryFn: async () => createHelixClient().listOrganizationMembers(organizationId as string)
+  });
+}
+
+function useMemberMutation<TInput, TResult>(
+  organizationId: string | undefined,
+  run: (organizationId: string, input: TInput) => Promise<TResult>
+) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: TInput) => {
+      if (!organizationId) throw new Error("Select an organization first");
+      return run(organizationId, input);
+    },
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["org-members", organizationId] }),
+        invalidateAuditEvents(queryClient, organizationId)
+      ]);
+    }
+  });
+}
+
+export function useAddOrgMember(organizationId?: string) {
+  return useMemberMutation(organizationId, (orgId, input: { email: string; role: OrgRole }) =>
+    createHelixClient().addOrganizationMember(orgId, input)
+  );
+}
+
+export function useChangeMemberRole(organizationId?: string) {
+  return useMemberMutation(organizationId, (orgId, input: { userId: string; role: OrgRole }) =>
+    createHelixClient().changeMemberRole(orgId, input.userId, input.role)
+  );
+}
+
+export function useRemoveOrgMember(organizationId?: string) {
+  return useMemberMutation(organizationId, (orgId, userId: string) =>
+    createHelixClient().removeOrganizationMember(orgId, userId)
+  );
+}
+
+export function useRevokeMemberInvite(organizationId?: string) {
+  return useMemberMutation(organizationId, (orgId, inviteId: string) =>
+    createHelixClient().revokeMemberInvite(orgId, inviteId)
+  );
 }

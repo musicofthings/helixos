@@ -16,12 +16,14 @@ import {
   Search,
   ShieldCheck,
   ToggleLeft,
-  ToggleRight
+  ToggleRight,
+  Users
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Workspace } from "@helixos/types";
 
+import { AccountCard } from "./account-card";
 import { AgentPanel } from "./agent/agent-panel";
 import { CommandPalette, useCommandPaletteShortcut, type CommandPaletteItem } from "./shell/command-palette";
 import {
@@ -39,6 +41,7 @@ import {
 } from "../hooks/use-helix-api";
 import { useDesktopShell } from "../hooks/use-desktop-shell";
 import { LabView } from "./eln/lab-view";
+import { MembersView } from "./members-view";
 import { ProtocolsView } from "./eln/protocols-view";
 import { ShareWorkspaceModal } from "./eln/share-workspace-modal";
 import { WorkspaceCreateForm } from "./eln/workspace-create-form";
@@ -54,7 +57,8 @@ type View =
   | "protocols"
   | "sequences"
   | "inventory"
-  | "connectors";
+  | "connectors"
+  | "members";
 
 type Reagent = {
   id: string;
@@ -90,7 +94,8 @@ const toolNavItems: Array<{ id: Exclude<View, "workspace-home">; icon: LucideIco
   { id: "protocols", icon: BookOpen, label: "Protocols" },
   { id: "sequences", icon: Dna, label: "Sequences" },
   { id: "inventory", icon: Beaker, label: "Inventory" },
-  { id: "connectors", icon: Network, label: "Connectors" }
+  { id: "connectors", icon: Network, label: "Connectors" },
+  { id: "members", icon: Users, label: "Members" }
 ];
 
 const defaultSequence =
@@ -169,6 +174,8 @@ export function WorkspaceApp({ initialDesktopShell = false }: { initialDesktopSh
 
   const [selectedOrganizationId, setSelectedOrganizationId] = useState<string | undefined>();
   const primaryOrganizationId = selectedOrganizationId ?? organizationsQuery.data?.[0]?.id;
+  const activeOrganization = organizationsQuery.data?.find((item) => item.id === primaryOrganizationId);
+  const hasNoOrganization = organizationsQuery.isSuccess && organizationsQuery.data.length === 0;
 
   const experimentsQuery = useExperiments(primaryOrganizationId, apiEnabled);
   const workspacesQuery = useWorkspaces(primaryOrganizationId, apiEnabled);
@@ -644,6 +651,8 @@ export function WorkspaceApp({ initialDesktopShell = false }: { initialDesktopSh
             ))}
           </nav>
 
+          <AccountCard />
+
           <section className="mt-8 rounded-md border border-black/10 bg-white p-3">
             <div className="flex items-center gap-2 text-sm font-semibold text-ink">
               <ShieldCheck size={16} />
@@ -672,6 +681,12 @@ export function WorkspaceApp({ initialDesktopShell = false }: { initialDesktopSh
                     : categoryLabel(activeWorkspace.category)
                   : "Create or select a workspace in the sidebar to get started."}
               </p>
+              {hasNoOrganization ? (
+                <p role="status" className="mt-2 rounded-md border border-signal/30 bg-[#eef6f7] px-3 py-2 text-xs text-signal">
+                  You are signed in, but not a member of any organization yet. Ask an organization admin to invite
+                  the email address you signed in with.
+                </p>
+              ) : null}
               {apiStatusMessage ? (
                 <p className="mt-2 rounded-md border border-signal/30 bg-[#eef6f7] px-3 py-2 text-xs text-signal">{apiStatusMessage}</p>
               ) : null}
@@ -832,6 +847,15 @@ export function WorkspaceApp({ initialDesktopShell = false }: { initialDesktopSh
               onSelectExperiment={setSelectedExperimentId}
               onActivity={log}
               newExperimentNonce={newExperimentNonce}
+            />
+          )}
+
+          {activeView === "members" && (
+            <MembersView
+              organizationId={primaryOrganizationId}
+              role={activeOrganization?.role}
+              apiEnabled={apiEnabled}
+              onActivity={log}
             />
           )}
 

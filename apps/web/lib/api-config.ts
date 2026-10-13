@@ -1,7 +1,12 @@
 import { HelixOSClient } from "@helixos/api-client";
 
-const DEFAULT_BASE_URL = "http://127.0.0.1:8000";
-const DEFAULT_TOKEN = "org-demo-token";
+import { getSessionToken } from "./auth";
+
+// Same-origin by default: requests go to /api/... and the Next server proxies
+// them to the API (see next.config.ts), so no API origin or CORS is involved.
+const DEFAULT_BASE_URL = "";
+// The demo token is a dev convenience only; production bundles must not carry it.
+const DEFAULT_TOKEN = process.env.NODE_ENV === "production" ? "" : "org-demo-token";
 
 type QuerySnapshot = {
   helix_api?: string;
@@ -76,6 +81,11 @@ export function getApiToken(): string {
     const queryToken = ensureQuerySnapshot().helix_token;
     if (queryToken) {
       return queryToken;
+    }
+
+    const sessionToken = getSessionToken();
+    if (sessionToken) {
+      return sessionToken;
     }
   }
 
