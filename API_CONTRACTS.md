@@ -32,6 +32,11 @@ HelixOS exposes versioned REST APIs under `/api/v1`.
 | `403` | `forbidden` | Actor cannot access the requested `organization_id`, or their role does not allow the action |
 | `403` | `account_disabled` | The signed-in user has been disabled by an operator |
 | `503` | `auth_unavailable` | The identity provider's keys could not be fetched; retry shortly (do not sign the user out) |
+| `413` | `payload_too_large` | Request body over `HELIX_MAX_BODY_BYTES` |
+| `422` | `message_too_long` | Agent message over the input limit |
+| `429` | `rate_limited` | Too many requests; see `Retry-After` and `details.scope` |
+| `429` | `ai_budget_exceeded` | An AI spend cap (`details.scope`: `global_monthly`, `organization_monthly`, `organization_daily`, `user_daily`) is used up until `details.resets_at` |
+| `429` | `ai_concurrency_limit` | Too many agent runs in progress for this user |
 | `409` | `last_admin` | The change would leave an organization without an admin |
 | `409` | `member_exists` | That person is already a member |
 | `404` | `not_found` | Resource missing, or outside the actor's tenant |
@@ -99,6 +104,7 @@ rejected with `422 invalid_update` rather than overwriting the record.
 | `GET` | `/api/v1/datasets/{dataset_id}` | Fetch a dataset |
 | `GET` | `/api/v1/sequences/{sequence_id}` | Fetch sequence metadata |
 | `GET` | `/api/v1/mcp/connectors` | List MCP connectors |
+| `GET` | `/api/v1/ai/usage` | AI spend vs. caps for an organization (`organization_id`; admins) |
 | `POST` | `/api/v1/ai/sessions` | Create agent session |
 | `POST` | `/api/v1/ai/runs` | Start agent run (SSE stream) |
 | `POST` | `/api/v1/mcp/jobs` | Dispatch connector tool via desktop MCP bridge |

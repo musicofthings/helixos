@@ -15,6 +15,8 @@ How the hosted API is configured and packaged. Desktop and local dev are unaffec
 | Database | memory / SQLite / Postgres | SQLite or Postgres (memory refused) | Postgres only |
 | AI provider | any (stub default) | any (warns on stub) | `openai` or `vertex` with credentials; stub refused |
 | `/docs`, `/openapi.json` | on | on | off (`HELIX_ENABLE_DOCS=1` to override) |
+| Rate limiting | off (`HELIX_RATE_LIMIT_ENABLED=1` to try it) | on | on; cannot be disabled |
+| AI prices and spend caps | optional | required with a paid provider | required with a paid provider |
 
 All violations are reported together in one error. `*` is rejected as an origin in every environment.
 
@@ -55,7 +57,7 @@ Notes:
 
 - The container listens on `$PORT` (default 8000), runs as a non-root user, and has a `/health` healthcheck.
 - **Run exactly one instance with one worker.** AI sessions and runs live in process memory until persisted; a second instance cannot see the first's sessions.
-- Set `FORWARDED_ALLOW_IPS` when behind a proxy (`*` on Cloud Run) so `X-Forwarded-*` headers are honored.
+- Behind a proxy set `HELIX_TRUSTED_PROXY_HOPS` (1 on Cloud Run). The API reads the client address from the *right* of `X-Forwarded-For`; it deliberately does not run uvicorn's `--proxy-headers`, which trusts the leftmost entry, and that one is client-controlled.
 - Streaming (`/api/v1/ai/runs`) is long-lived: raise the platform request timeout accordingly.
 - `.dockerignore` is an allowlist, so `.env` files and local databases cannot enter the build context.
 
@@ -80,6 +82,38 @@ docker build -f apps/web/Dockerfile -t helixos-web \
 Next's standalone server, non-root, listening on `$PORT` (default 8080). Public settings are compiled in, so **build one web image per environment** (the API image is environment-agnostic and can be promoted unchanged). Never pass a secret as a build argument. `.dockerignore` excludes every `.env*` file so a local `.env.local` cannot leak its dev token into a bundle.
 
 The API marks its event streams `Cache-Control: no-transform`. Without it Next's proxy gzips the stream and delivers the whole agent run in one burst at the end; keep that header if you ever change the streaming response.
+
+## Rate limits and AI spend caps
+
+### Request limits
+
+Token buckets in process memory (correct while the API is a single instance; scaling out needs a shared store). A refused request is `429 rate_limited` with `Retry-After`, the standard error envelope, and `details.scope` naming the bucket.
+
+| Limit (env var) | Default | Applies to |
+| --- | --- | --- |
+| `HELIX_RATE_LIMIT_ACTOR_PER_MINUTE` | 600 | every authenticated request, per user |
+| `HELIX_RATE_LIMIT_WRITE_PER_MINUTE` | 120 | POST/PUT/PATCH/DELETE, per user |
+| `HELIX_RATE_LIMIT_AI_RUN_PER_MINUTE` | 6 | starting an agent run, per user |
+| `HELIX_RATE_LIMIT_AI_RUN_ORG_PER_MINUTE` | 30 | starting agent runs, per organization |
+| `HELIX_RATE_LIMIT_AI_SESSION_PER_MINUTE` | 20 | creating agent sessions, per user |
+| `HELIX_RATE_LIMIT_MCP_JOB_PER_MINUTE` | 30 | connector jobs, per user |
+| `HELIX_RATE_LIMIT_INVITE_ACCEPT_PER_HOUR` | 30 | accepting workspace invites (bearer tokens), per user |
+| `HELIX_RATE_LIMIT_AUTH_FAILURES_PER_MINUTE` | 20 | rejected credentials, per client address |
+| `HELIX_MAX_BODY_BYTES` | 2 MiB | request body size (`413 payload_too_large`), always on |
+
+Failed authentication is throttled per address, but a *valid* token is never blocked by it: through the web tier many users share one address, so it only slows credential guessing. The web client never retries a 4xx.
+
+### AI spend
+
+Every agent run is metered and bounded:
+
+- **Per run:** at most `HELIX_AI_MAX_OUTPUT_TOKENS` (default 1024) generated, `HELIX_AI_MAX_INPUT_CHARS` (8000) accepted, and `HELIX_AI_RUN_TIMEOUT_SECONDS` (120) of wall time. `HELIX_AI_MAX_CONCURRENT_RUNS_PER_USER` (2 when hosted) bounds parallel runs.
+- **Caps** (USD, UTC calendar windows, any subset): `HELIX_AI_BUDGET_GLOBAL_MONTHLY_USD`, `_ORG_MONTHLY_USD`, `_ORG_DAILY_USD`, `_USER_DAILY_USD`. A hosted deployment with a paid provider **must** set prices (`HELIX_AI_PRICE_INPUT_USD_PER_MTOK`, `_OUTPUT_`) and at least the global monthly and per-organization daily caps, or it will not start. Prices are not built in: copy them from your provider's price list and update them when it changes, because the caps are only as accurate as the prices.
+- **How it works:** before streaming, a run *reserves* its worst-case cost (prompt plus the maximum output). It is refused (`429 ai_budget_exceeded`, with `Retry-After` until the window resets, before any streaming starts) if that would cross a cap, counting runs already in flight, so a burst cannot overshoot. When the run ends it records actual usage: provider-reported tokens, or an estimate (3 characters per token, deliberately pessimistic) when the provider reports none. Disconnected, failed and timed-out runs are charged for what they consumed; a run that fails before the model is called is free.
+- **Ledger:** the `ai_usage` table (append-only, in the same transaction as the run's audit event). Admins read it at `GET /api/v1/ai/usage?organization_id=`; run audit events carry tokens and cost. Dollar figures are only shown to admins; users see which limit was hit and when it resets.
+- **Alert on it:** the API logs `"ai budget exceeded"` (with `scope`, `organization_id`, spent and cap) each time a run is refused. Create a log-based metric and alert on it in Cloud Monitoring, and set the provider's own billing alert as the backstop — this ledger counts what HelixOS sent, not what the provider invoiced.
+
+Limits to know: reservations and rate-limit buckets live in process memory, so a restart forgets in-flight holds (spend already recorded is durable), and a second API instance would need them shared first. If your provider rejects `stream_options`, set `HELIX_OPENAI_STREAM_USAGE=0` and spend falls back to estimates.
 
 ## Hosted deployment (GCP Cloud Run, `asia-south1`)
 

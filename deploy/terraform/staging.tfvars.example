@@ -11,6 +11,13 @@ oidc_audience = "helixos-api"
 enable_demo_tokens = false
 ai_provider        = "stub"
 
+# With a paid provider (ai_provider = "openai" or "vertex") these are required.
+# Copy the prices from the provider's price list; caps are in US dollars.
+# ai_price_input_usd_per_mtok  = "0.15"
+# ai_price_output_usd_per_mtok = "0.60"
+# ai_budget_global_monthly_usd = "50"
+# ai_budget_org_daily_usd      = "5"
+
 # Set after the first apply and the first image push (see docs/DEPLOYMENT.md):
 # api_image = "asia-south1-docker.pkg.dev/helixos-staging/helixos-staging/api:<tag>"
 # web_image = "asia-south1-docker.pkg.dev/helixos-staging/helixos-staging/web:<tag>"

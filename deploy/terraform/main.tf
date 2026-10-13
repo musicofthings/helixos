@@ -244,9 +244,26 @@ resource "google_cloud_run_v2_service" "api" {
         name  = "HELIX_AI_PROVIDER"
         value = var.ai_provider
       }
+      # Cloud Run's front end is the one trusted proxy: the client address is the
+      # rightmost X-Forwarded-For entry (used by rate limiting).
       env {
-        name  = "FORWARDED_ALLOW_IPS"
-        value = "*"
+        name  = "HELIX_TRUSTED_PROXY_HOPS"
+        value = "1"
+      }
+      # Spend control: token prices and caps. Required for a paid provider.
+      dynamic "env" {
+        for_each = { for k, v in {
+          HELIX_AI_PRICE_INPUT_USD_PER_MTOK  = var.ai_price_input_usd_per_mtok
+          HELIX_AI_PRICE_OUTPUT_USD_PER_MTOK = var.ai_price_output_usd_per_mtok
+          HELIX_AI_BUDGET_GLOBAL_MONTHLY_USD = var.ai_budget_global_monthly_usd
+          HELIX_AI_BUDGET_ORG_DAILY_USD      = var.ai_budget_org_daily_usd
+          HELIX_AI_BUDGET_ORG_MONTHLY_USD    = var.ai_budget_org_monthly_usd
+          HELIX_AI_BUDGET_USER_DAILY_USD     = var.ai_budget_user_daily_usd
+        } : k => v if v != "" }
+        content {
+          name  = env.key
+          value = env.value
+        }
       }
       dynamic "env" {
         for_each = var.enable_demo_tokens && !local.is_prod ? [1] : []
@@ -309,6 +326,16 @@ resource "google_cloud_run_v2_service" "api" {
       client,
       client_version,
     ]
+
+    # The API refuses to start with a paid provider and no ceiling; fail the plan
+    # instead of a deploy.
+    precondition {
+      condition = var.ai_provider == "stub" || (
+        var.ai_price_input_usd_per_mtok != "" && var.ai_price_output_usd_per_mtok != "" &&
+        var.ai_budget_global_monthly_usd != "" && var.ai_budget_org_daily_usd != ""
+      )
+      error_message = "A paid ai_provider needs ai_price_input_usd_per_mtok, ai_price_output_usd_per_mtok, ai_budget_global_monthly_usd and ai_budget_org_daily_usd."
+    }
   }
 
   depends_on = [

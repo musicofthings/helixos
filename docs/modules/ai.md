@@ -73,3 +73,13 @@ data: {"content": "Suggested ", "run_id": "run_abc123"}
 event: done
 data: {"run_id": "run_abc123", "status": "completed"}
 ```
+
+## Limits and spend control
+
+Agent runs are bounded and metered; see [DEPLOYMENT.md](../DEPLOYMENT.md#rate-limits-and-ai-spend-caps) for settings.
+
+- **Before streaming** (so refusals are ordinary HTTP errors): message length, per-user and per-org run rate, per-user concurrency, and the spend caps. A run reserves its worst-case cost; over-cap is `429 ai_budget_exceeded`.
+- **During:** the provider is told the maximum output tokens, and the run has a wall-clock limit.
+- **After (every exit path):** actual usage (provider-reported, else estimated) goes to the `ai_usage` ledger in the same transaction as the run's terminal audit event, and the reservation is released only once that has committed.
+- Providers expose `usage` and `model` and accept `max_output_tokens`; a new provider must do the same, or its spend is estimated.
+

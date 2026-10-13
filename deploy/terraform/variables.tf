@@ -91,6 +91,40 @@ variable "ai_provider" {
   }
 }
 
+# ---- AI spend control (USD; strings so that "unset" is distinguishable from 0) ----
+variable "ai_price_input_usd_per_mtok" {
+  type        = string
+  default     = ""
+  description = "Provider price per million input tokens. Copy it from the provider's price list; spend caps are only as accurate as this."
+}
+
+variable "ai_price_output_usd_per_mtok" {
+  type    = string
+  default = ""
+}
+
+variable "ai_budget_global_monthly_usd" {
+  type        = string
+  default     = ""
+  description = "Platform-wide monthly ceiling. Required with a paid provider."
+}
+
+variable "ai_budget_org_daily_usd" {
+  type        = string
+  default     = ""
+  description = "Per-organization daily ceiling. Required with a paid provider."
+}
+
+variable "ai_budget_org_monthly_usd" {
+  type    = string
+  default = ""
+}
+
+variable "ai_budget_user_daily_usd" {
+  type    = string
+  default = ""
+}
+
 # ---- Sizing ----
 variable "db_tier" {
   type        = string

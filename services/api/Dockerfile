@@ -30,6 +30,7 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
     CMD ["python", "-c", "import os, urllib.request as u; u.urlopen('http://127.0.0.1:%s/health' % os.getenv('PORT', '8000'), timeout=3)"]
 # One process: AI sessions/runs are held in memory per process until they are
 # persisted, so do not add workers or scale beyond one instance yet.
-# Behind a reverse proxy set FORWARDED_ALLOW_IPS to its address (or "*" when
-# the platform's proxy is the only way in, e.g. Cloud Run).
-CMD ["sh", "-c", "exec uvicorn helixos.main:app --host 0.0.0.0 --port ${PORT} --proxy-headers --no-access-log"]
+# No --proxy-headers: uvicorn would trust the client-controlled leftmost
+# X-Forwarded-For entry. Rate limiting reads the header itself, from the right,
+# using HELIX_TRUSTED_PROXY_HOPS (1 behind Cloud Run's front end).
+CMD ["sh", "-c", "exec uvicorn helixos.main:app --host 0.0.0.0 --port ${PORT} --no-access-log"]
