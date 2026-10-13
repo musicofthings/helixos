@@ -9,10 +9,17 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from helixos.observability import current_request_id
 
 
-def api_error(status_code: int, code: str, message: str, details: dict[str, Any] | None = None) -> HTTPException:
+def api_error(
+    status_code: int,
+    code: str,
+    message: str,
+    details: dict[str, Any] | None = None,
+    headers: dict[str, str] | None = None,
+) -> HTTPException:
     """Create an HTTP exception that renders through the stable error envelope."""
     return HTTPException(
         status_code=status_code,
+        headers=headers,
         detail={
             "code": code,
             "message": message,

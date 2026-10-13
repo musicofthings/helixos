@@ -23,6 +23,7 @@ from helixos.observability import (
     configure_logging,
 )
 from helixos.pagination import PAGINATION_HEADERS
+from helixos.ratelimit import MaxBodySizeMiddleware
 from helixos.db.settings import get_database_settings
 from helixos.modules.router import router as modules_router
 from helixos.eln.router import router as eln_router
@@ -60,7 +61,7 @@ def _cors_options() -> dict:
     options: dict = {
         "allow_origins": list(config.allowed_origins()),
         "allow_credentials": True,
-        "expose_headers": [*PAGINATION_HEADERS, REQUEST_ID_HEADER],
+        "expose_headers": [*PAGINATION_HEADERS, REQUEST_ID_HEADER, "Retry-After"],
     }
     if config.is_hosted():
         options["allow_methods"] = ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
@@ -99,6 +100,9 @@ def create_app() -> FastAPI:
     )
 
     # Added first = innermost, so CORS still wraps error responses it produces.
+    # The body-size guard sits inside request-context (so its 413 carries a request
+    # id) and inside CORS (so browsers can read it).
+    app.add_middleware(MaxBodySizeMiddleware)
     app.add_middleware(RequestContextMiddleware)
     app.add_middleware(CORSMiddleware, **_cors_options())
 

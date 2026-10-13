@@ -5,10 +5,10 @@ import json
 import logging
 from typing import Any
 
-from fastapi import Depends
+from fastapi import Depends, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
-from helixos import config
+from helixos import config, ratelimit
 from helixos.auth.oidc import OidcError, OidcVerifier
 from helixos.auth.roles import (
     ROLE_PERMISSIONS,
@@ -270,21 +270,25 @@ def _actor_from_unverified_jwt(token: str) -> Actor | None:
     )
 
 
+def _reject_unauthenticated(request: Request, message: str):
+    """401, unless this address has already failed too often (then 429)."""
+    ratelimit.record_auth_failure(request)
+    return api_error(status_code=401, code="unauthorized", message=message)
+
+
 def get_current_actor(
+    request: Request,
     credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
 ) -> Actor:
-    """Extract the authenticated actor from a bearer token."""
+    """Extract the authenticated actor from a bearer token and apply per-user rate limits."""
     if credentials is None:
-        raise api_error(
-            status_code=401, code="unauthorized", message="Bearer token is required"
-        )
+        raise _reject_unauthenticated(request, "Bearer token is required")
 
     actor = actor_from_token(credentials.credentials)
     if actor is None:
-        raise api_error(
-            status_code=401, code="unauthorized", message="Bearer token is invalid"
-        )
+        raise _reject_unauthenticated(request, "Bearer token is invalid")
     bind(actor=actor.subject)
+    ratelimit.enforce_actor(actor, request.method)
     return actor
 
 

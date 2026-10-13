@@ -2,6 +2,7 @@
 
 from fastapi import APIRouter, Depends, Query, Response
 
+from helixos import limits, ratelimit
 from helixos.auth.schemas import Actor
 from helixos.auth.service import get_current_actor
 from helixos.pagination import PageParams, describe_page, page_params, to_request
@@ -171,6 +172,11 @@ def accept_workspace_invite(
     token: str, actor: Actor = Depends(get_current_actor)
 ) -> WorkspaceShare:
     """Accept a workspace invite and become a collaborator."""
+    # Tokens are bearer secrets: slow anyone trying many of them.
+    settings = limits.rate_limit_settings()
+    ratelimit.enforce(
+        "invite_accept", actor.subject, settings.invite_accept_per_hour, per_seconds=3600
+    )
     return eln_service.accept_invite(token, actor=actor)
 
 

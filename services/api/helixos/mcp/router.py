@@ -5,6 +5,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, Depends
 
+from helixos import limits, ratelimit
 from helixos.auth.schemas import Actor
 from helixos.auth.service import get_current_actor
 from helixos.mcp.schemas import (
@@ -59,6 +60,7 @@ async def run_connector_job(
     actor: Actor = Depends(get_current_actor),
 ) -> ConnectorJobResult:
     """Dispatch a connector tool through the desktop MCP bridge."""
+    ratelimit.enforce("mcp_job", actor.subject, limits.rate_limit_settings().mcp_job_per_minute)
     known_ids = {connector.id for connector in CONNECTORS}
     if payload.connector_id not in known_ids:
         from helixos.errors import api_error
