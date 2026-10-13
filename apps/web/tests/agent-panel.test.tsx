@@ -124,4 +124,19 @@ describe("AgentPanel session errors", () => {
 
     expect(screen.getByText(/Session service down \(ref req_sess\)/)).toBeTruthy();
   });
+
+  it.each([
+    ["ai_budget_exceeded", "Your organization's daily AI budget has been reached. It resets at midnight UTC."],
+    ["rate_limited", "You are starting agent runs too quickly. Wait a moment and try again."]
+  ])("tells the user plainly when a run is refused (%s)", async (code, message) => {
+    api.streamAgentRun.mockImplementation(
+      stream([new HelixOSApiError(429, code, message, { retry_after_seconds: 30 }, "req_429")])
+    );
+    const { onActivity } = renderPanel();
+
+    ask("hi");
+
+    await waitFor(() => expect(onActivity).toHaveBeenCalledWith(`Agent run failed: ${message} (ref req_429)`));
+    expect((await screen.findAllByText(`${message} (ref req_429)`)).length).toBeGreaterThan(0);
+  });
 });
