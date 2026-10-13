@@ -1,0 +1,19 @@
+# Allowlist: nothing enters a build context unless listed here, so local
+# databases and the venv can never leak into an image.
+*
+!services/api/pyproject.toml
+!services/api/helixos
+!mcp/registry.json
+!prompts
+!packages
+!apps/web
+
+# Exclusions below override the allowlist above (last match wins).
+# .env.local holds a dev token that would be compiled into the web bundle.
+**/.env*
+**/node_modules
+**/.next
+apps/web/out
+**/*.tsbuildinfo
+**/__pycache__
+**/*.pyc

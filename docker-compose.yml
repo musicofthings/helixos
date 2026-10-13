@@ -10,6 +10,39 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
 
+  # Production image against local Postgres, in staging posture:
+  #   docker compose --profile app up --build   # web on :3000, api on :8000
+  api:
+    profiles: ["app"]
+    build:
+      context: .
+      dockerfile: services/api/Dockerfile
+    depends_on:
+      - postgres
+    environment:
+      HELIX_ENV: staging
+      HELIX_DATABASE_URL: postgresql+psycopg://helixos:helixos@postgres:5432/helixos
+      ALLOWED_ORIGINS: http://localhost:3000,http://127.0.0.1:3000
+      HELIX_ENABLE_DEMO_TOKENS: "1"
+      HELIX_AI_PROVIDER: stub
+    ports:
+      - "8000:8000"
+
+  # Web image proxying /api to the api service above. Staging posture with demo
+  # tokens, so the demo token is baked into this local-only build.
+  web:
+    profiles: ["app"]
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+      args:
+        HELIX_API_PROXY_TARGET: http://api:8000
+        NEXT_PUBLIC_API_TOKEN: org-demo-token
+    depends_on:
+      - api
+    ports:
+      - "3000:8080"
+
   redis:
     image: redis:7-alpine
     ports:
