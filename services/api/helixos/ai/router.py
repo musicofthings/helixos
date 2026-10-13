@@ -14,7 +14,9 @@ router = APIRouter(prefix="/ai", tags=["ai"])
 
 
 @router.post("/sessions", response_model=AgentSession, status_code=201)
-def create_session(payload: AgentSessionCreate, actor: Actor = Depends(get_current_actor)) -> AgentSession:
+def create_session(
+    payload: AgentSessionCreate, actor: Actor = Depends(get_current_actor)
+) -> AgentSession:
     """Create an agent session for a tenant."""
     session = agent_service.create_session(payload.organization_id, actor)
     return AgentSession(
@@ -26,7 +28,9 @@ def create_session(payload: AgentSessionCreate, actor: Actor = Depends(get_curre
 
 
 @router.post("/runs")
-async def start_run(payload: AgentRunCreate, actor: Actor = Depends(get_current_actor)) -> StreamingResponse:
+async def start_run(
+    payload: AgentRunCreate, actor: Actor = Depends(get_current_actor)
+) -> StreamingResponse:
     """Start an agent run and stream SSE events."""
     # Validate before headers are sent so 404/403 use the normal error envelope.
     agent_service.authorize_session(payload.session_id, actor)
@@ -42,4 +46,14 @@ async def start_run(payload: AgentRunCreate, actor: Actor = Depends(get_current_
         ):
             yield frame
 
-    return StreamingResponse(event_stream(), media_type="text/event-stream")
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            # no-transform stops compressing proxies (Next's rewrite proxy gzips
+            # otherwise and holds the whole stream until it ends); X-Accel-Buffering
+            # does the same for nginx-style proxies.
+            "Cache-Control": "no-cache, no-transform",
+            "X-Accel-Buffering": "no",
+        },
+    )

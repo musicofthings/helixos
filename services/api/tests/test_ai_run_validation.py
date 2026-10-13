@@ -81,3 +81,21 @@ def test_session_and_run_retention_is_bounded(monkeypatch) -> None:
     ids = [svc.create_session("org_demo", actor).id for _ in range(5)]
     assert len(svc._sessions) == 3
     assert ids[0] not in svc._sessions and ids[-1] in svc._sessions
+
+
+def test_stream_headers_forbid_proxy_buffering_and_compression(memory_client) -> None:
+    """A gzip-ing proxy would deliver the whole run at once, after it finishes."""
+    headers = {"Authorization": "Bearer org-demo-token"}
+    session = memory_client.post(
+        "/api/v1/ai/sessions", headers=headers, json={"organization_id": "org_demo"}
+    ).json()
+    with memory_client.stream(
+        "POST",
+        "/api/v1/ai/runs",
+        headers=headers,
+        json={"session_id": session["id"], "message": "hello"},
+    ) as response:
+        assert response.status_code == 200
+        assert "no-transform" in response.headers["cache-control"]
+        assert response.headers["x-accel-buffering"] == "no"
+        assert response.headers["content-type"].startswith("text/event-stream")
