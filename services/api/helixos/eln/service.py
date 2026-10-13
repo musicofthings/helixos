@@ -13,6 +13,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Literal
 
 from helixos.audit.service import audit_service
+from helixos.auth.roles import EXPERIMENTS_SIGN
 from helixos.auth.schemas import Actor
 from helixos.auth.service import DEMO_TOKENS, organization_service
 from helixos.db.settings import DatabaseSettings, get_database_settings
@@ -72,6 +73,7 @@ _ACCESS_RANK: dict[WorkspaceAccess, int] = {
 }
 _KNOWN_SUBJECTS = {actor.subject for actor in DEMO_TOKENS.values()}
 _EMAIL_SUBJECT = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+_USER_ID_SUBJECT = re.compile(r"^usr_[0-9a-f]{32}$")
 
 
 def _coerce_access(
@@ -179,7 +181,7 @@ class ElnService:
         self, organization_id: str, actor: Actor
     ) -> list[Workspace]:
         """Seed the default workspace set for an organization if it has none."""
-        organization_service.require_access(actor, organization_id)
+        organization_service.require_write(actor, organization_id)
         if self._store.count_workspaces(organization_id) > 0:
             return self._store.list_workspaces([organization_id])
 
@@ -206,7 +208,7 @@ class ElnService:
 
     @_atomic
     def create_workspace(self, payload: WorkspaceCreate, actor: Actor) -> Workspace:
-        organization_service.require_access(actor, payload.organization_id)
+        organization_service.require_write(actor, payload.organization_id)
         workspace = Workspace(**payload.model_dump())
         self._store.create_workspace(workspace)
         self._audit(
@@ -224,7 +226,10 @@ class ElnService:
     ) -> list[Workspace]:
         """Workspaces the actor reaches through a share (optionally within one org)."""
         shared: list[Workspace] = []
-        for share in self._store.list_shares_for_subject(actor.subject):
+        shares: list[WorkspaceShare] = []
+        for identity in actor.identities:
+            shares.extend(self._store.list_shares_for_subject(identity))
+        for share in shares:
             workspace = self._store.get_workspace(share.workspace_id)
             if workspace is None:
                 continue
@@ -450,7 +455,7 @@ class ElnService:
                 message="This invite has expired, been revoked, or reached its use limit",
                 details={"invite_id": invite.id},
             )
-        existing = self._store.find_share(invite.workspace_id, actor.subject)
+        existing = self._find_actor_share(invite.workspace_id, actor)
         if existing is not None:
             self._accept_or_410(invite, None)
             return existing
@@ -767,7 +772,7 @@ class ElnService:
             )
         else:
             # Legacy unscoped experiments: org membership required.
-            organization_service.require_access(actor, payload.organization_id)
+            organization_service.require_write(actor, payload.organization_id)
 
         experiment = Experiment(
             organization_id=payload.organization_id,
@@ -936,9 +941,18 @@ class ElnService:
         experiment = self._store.get_experiment(experiment_id)
         if experiment is None:
             raise _not_found("experiment", experiment_id)
+        signing = payload.status == ExperimentStatus.SIGNED
+        # Sign-off is a reviewer action: a read-only QA role may do it, but
+        # every other transition is an edit.
         self._require_experiment_role(
-            experiment, actor, WorkspaceShareRole.EDITOR
+            experiment,
+            actor,
+            WorkspaceShareRole.VIEWER if signing else WorkspaceShareRole.EDITOR,
         )
+        if signing:
+            organization_service.require_permission(
+                actor, experiment.organization_id, EXPERIMENTS_SIGN
+            )
         version = self._store.get_version(version_id)
         if version is None or version.experiment_id != experiment_id:
             raise _not_found("experiment_version", version_id)
@@ -1202,12 +1216,30 @@ class ElnService:
     def _workspace_access_level(
         self, workspace: Workspace, actor: Actor
     ) -> WorkspaceAccess | None:
-        if workspace.organization_id in actor.organization_ids:
-            return "owner"
-        share = self._store.find_share(workspace.id, actor.subject)
-        if share is None:
-            return None
-        return _coerce_access(share.role)
+        best: WorkspaceAccess | None = organization_service.workspace_access(
+            actor, workspace.organization_id
+        )
+        share = self._find_actor_share(workspace.id, actor)
+        if share is not None:
+            granted = _coerce_access(share.role)
+            if best is None or _ACCESS_RANK[granted] > _ACCESS_RANK[best]:
+                best = granted
+        return best
+
+    def _find_actor_share(
+        self, workspace_id: str, actor: Actor
+    ) -> WorkspaceShare | None:
+        """The actor's strongest share, whether addressed by user id or verified email."""
+        found: WorkspaceShare | None = None
+        for identity in actor.identities:
+            share = self._store.find_share(workspace_id, identity)
+            if share is not None and (
+                found is None
+                or _ACCESS_RANK[_coerce_access(share.role)]
+                > _ACCESS_RANK[_coerce_access(found.role)]
+            ):
+                found = share
+        return found
 
     def _require_experiment_role(
         self,
@@ -1221,12 +1253,27 @@ class ElnService:
                 raise _not_found("project", experiment.project_id)
             self.require_workspace_role(project.workspace_id, actor, min_role)
             return
-        # Legacy experiments without a project: org membership only.
+        # Legacy experiments without a project: governed by the org role alone.
         organization_service.require_access(actor, experiment.organization_id)
+        access = organization_service.workspace_access(actor, experiment.organization_id)
+        needed = _coerce_access(min_role)
+        if access is None or _ACCESS_RANK[access] < _ACCESS_RANK[needed]:
+            raise api_error(
+                status_code=403,
+                code="forbidden",
+                message="Your role in this organization does not allow this action",
+                details={
+                    "organization_id": experiment.organization_id,
+                    "required_role": needed,
+                    "actual_role": access,
+                },
+            )
 
     def _validate_share_subject(self, subject: str) -> str:
         cleaned = subject.strip()
-        if cleaned in _KNOWN_SUBJECTS or _EMAIL_SUBJECT.match(cleaned):
+        if _EMAIL_SUBJECT.match(cleaned):
+            return cleaned.lower()
+        if cleaned in _KNOWN_SUBJECTS or _USER_ID_SUBJECT.match(cleaned):
             return cleaned
         raise api_error(
             status_code=422,

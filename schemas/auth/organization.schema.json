@@ -3,12 +3,49 @@
   "$id": "https://helixos.dev/schemas/auth/organization.schema.json",
   "title": "Organization",
   "type": "object",
-  "required": ["id", "name", "slug", "created_at", "updated_at"],
+  "required": [
+    "id",
+    "name",
+    "slug",
+    "created_at",
+    "updated_at",
+    "role"
+  ],
   "properties": {
-    "id": { "type": "string" },
-    "name": { "type": "string", "minLength": 1 },
-    "slug": { "type": "string", "minLength": 1 },
-    "created_at": { "type": "string", "format": "date-time" },
-    "updated_at": { "type": "string", "format": "date-time" }
+    "id": {
+      "type": "string"
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1
+    },
+    "slug": {
+      "type": "string",
+      "minLength": 1
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "updated_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "role": {
+      "description": "The caller's role in this organization (null when unknown).",
+      "type": [
+        "string",
+        "null"
+      ],
+      "enum": [
+        "admin",
+        "pi",
+        "scientist",
+        "technician",
+        "qa_reviewer",
+        "external_collaborator",
+        null
+      ]
+    }
   }
 }

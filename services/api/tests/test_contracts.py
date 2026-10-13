@@ -85,7 +85,10 @@ def test_schema_matches_model_shape(path) -> None:
         node = schema["properties"][name]
         assert _schema_nullable(node) == nullable, f"{name}: nullability drifted"
         if isinstance(inner, type) and issubclass(inner, enum.Enum):
-            assert set(node["enum"]) == {m.value for m in inner}, f"{name}: enum drifted"
+            # null is listed in a nullable enum; nullability is asserted above.
+            assert set(node["enum"]) - {None} == {m.value for m in inner}, (
+                f"{name}: enum drifted"
+            )
 
 
 @pytest.mark.parametrize("path", sorted(CONTRACTS))
@@ -118,14 +121,22 @@ def test_live_api_responses_conform_to_schemas(memory_client: TestClient) -> Non
         client.post(
             "/api/v1/workspaces",
             headers=ORG_DEMO,
-            json={"organization_id": "org_demo", "name": "Contract", "category": "custom"},
+            json={
+                "organization_id": "org_demo",
+                "name": "Contract",
+                "category": "custom",
+            },
         )
     )
     project = ok(
         client.post(
             "/api/v1/projects",
             headers=ORG_DEMO,
-            json={"organization_id": "org_demo", "workspace_id": workspace["id"], "name": "P"},
+            json={
+                "organization_id": "org_demo",
+                "workspace_id": workspace["id"],
+                "name": "P",
+            },
         )
     )
     protocol = ok(
@@ -152,7 +163,9 @@ def test_live_api_responses_conform_to_schemas(memory_client: TestClient) -> Non
             },
         )
     )
-    versions = ok(client.get(f"/api/v1/experiments/{experiment['id']}/versions", headers=ORG_DEMO))
+    versions = ok(
+        client.get(f"/api/v1/experiments/{experiment['id']}/versions", headers=ORG_DEMO)
+    )
     sample = ok(
         client.post(
             "/api/v1/samples",

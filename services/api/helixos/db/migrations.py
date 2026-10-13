@@ -77,6 +77,7 @@ def _baseline(connection: Connection, op: Operations) -> None:
     was first created (the behaviour databases relied on before versioning)."""
     # Importing registers every ORM model on Base.metadata.
     from helixos.audit.orm import AuditEventORM  # noqa: F401
+    from helixos.auth import orm as auth_orm  # noqa: F401
     from helixos.eln import orm as eln_orm  # noqa: F401
 
     Base.metadata.create_all(connection)
@@ -100,13 +101,33 @@ def _baseline(connection: Connection, op: Operations) -> None:
 
 # (index name, table, columns) — frozen here; later indexes belong in a later migration.
 _LIST_INDEXES: list[tuple[str, str, list[str]]] = [
-    ("ix_eln_list_workspaces", "eln_workspaces", ["organization_id", "created_at", "id"]),
-    ("ix_eln_list_projects_org", "eln_projects", ["organization_id", "created_at", "id"]),
+    (
+        "ix_eln_list_workspaces",
+        "eln_workspaces",
+        ["organization_id", "created_at", "id"],
+    ),
+    (
+        "ix_eln_list_projects_org",
+        "eln_projects",
+        ["organization_id", "created_at", "id"],
+    ),
     ("ix_eln_list_projects_ws", "eln_projects", ["workspace_id", "created_at", "id"]),
-    ("ix_eln_list_protocols_org", "eln_protocols", ["organization_id", "created_at", "id"]),
+    (
+        "ix_eln_list_protocols_org",
+        "eln_protocols",
+        ["organization_id", "created_at", "id"],
+    ),
     ("ix_eln_list_protocols_ws", "eln_protocols", ["workspace_id", "created_at", "id"]),
-    ("ix_eln_list_experiments_org", "eln_experiments", ["organization_id", "created_at", "id"]),
-    ("ix_eln_list_experiments_project", "eln_experiments", ["project_id", "created_at", "id"]),
+    (
+        "ix_eln_list_experiments_org",
+        "eln_experiments",
+        ["organization_id", "created_at", "id"],
+    ),
+    (
+        "ix_eln_list_experiments_project",
+        "eln_experiments",
+        ["project_id", "created_at", "id"],
+    ),
     ("ix_eln_list_samples", "eln_samples", ["experiment_id", "created_at", "id"]),
     ("ix_eln_list_datasets", "eln_datasets", ["sample_id", "created_at", "id"]),
 ]
@@ -123,9 +144,27 @@ def _list_indexes(connection: Connection, op: Operations) -> None:
             op.create_index(name, table, columns)
 
 
+def _auth_tables(connection: Connection, op: Operations) -> None:
+    """Organizations, users, memberships and member invites.
+
+    Fresh databases already have them (the baseline builds from the models);
+    ``checkfirst`` makes this a no-op there.
+    """
+    from helixos.auth import orm as auth_orm
+
+    tables = [
+        auth_orm.OrganizationORM.__table__,
+        auth_orm.UserORM.__table__,
+        auth_orm.MembershipORM.__table__,
+        auth_orm.MemberInviteORM.__table__,
+    ]
+    Base.metadata.create_all(connection, tables=tables, checkfirst=True)
+
+
 MIGRATIONS: list[tuple[str, MigrationFn]] = [
     ("0001_baseline", _baseline),
     ("0002_eln_list_indexes", _list_indexes),
+    ("0003_auth_tables", _auth_tables),
 ]
 
 

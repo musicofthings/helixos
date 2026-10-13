@@ -145,3 +145,123 @@ def test_concurrent_startup_migrations_apply_once(postgres_url) -> None:
         assert "audit_events" in inspect(engine).get_table_names()
     finally:
         engine.dispose()
+
+
+# --------------------------------------------------------------------------- #
+# Auth: membership and first-sign-in races
+# --------------------------------------------------------------------------- #
+def _oidc_client(postgres_url, monkeypatch):
+    from fastapi.testclient import TestClient
+    from oidc_support import AUDIENCE, ISSUER, FakeIdp
+
+    from helixos.main import create_app
+
+    idp = FakeIdp()
+    monkeypatch.setattr("helixos.auth.oidc.http_get_json", idp.fetch)
+    monkeypatch.setenv("HELIX_ENV", "staging")
+    monkeypatch.setenv("ALLOWED_ORIGINS", "https://app.example.test")
+    monkeypatch.setenv("HELIX_OIDC_ISSUER", ISSUER)
+    monkeypatch.setenv("HELIX_OIDC_AUDIENCE", AUDIENCE)
+    monkeypatch.setenv("HELIX_OIDC_JWKS_URL", "https://idp.example.test/jwks.json")
+    monkeypatch.setattr("helixos.auth.service._verifier", None)
+    return TestClient(create_app()), idp
+
+
+def test_concurrent_first_sign_ins_create_exactly_one_user(
+    postgres_url, monkeypatch
+) -> None:
+    from helixos.auth.orm import UserORM
+    from helixos.db.session import session_scope
+
+    client, idp = _oidc_client(postgres_url, monkeypatch)
+    headers = {
+        "Authorization": f"Bearer {idp.token('idp|racer', email='racer@x.test')}"
+    }
+
+    codes = _race(
+        THREADS,
+        lambda _i: client.get("/api/v1/organizations", headers=headers).status_code,
+    )
+    assert codes == [200] * THREADS, codes
+
+    with session_scope() as session:
+        users = session.scalar(
+            select(func.count())
+            .select_from(UserORM)
+            .where(UserORM.subject == "idp|racer")
+        )
+    assert users == 1
+
+
+def test_two_admins_cannot_demote_each_other_into_an_adminless_org(
+    postgres_url, monkeypatch
+) -> None:
+    from helixos.auth.orm import MembershipORM
+    from helixos.auth.roles import OrgRole
+    from helixos.auth.store import LastAdmin, auth_store
+    from helixos.db.session import session_scope
+
+    client, idp = _oidc_client(postgres_url, monkeypatch)
+    auth_store.create_organization("org_race", "Race", "race")
+    people = {}
+    for name in ("a", "b"):
+        auth_store.add_member_by_email(
+            "org_race", f"{name}@x.test", OrgRole.ADMIN, invited_by="test"
+        )
+        headers = {
+            "Authorization": f"Bearer {idp.token(f'idp|{name}', email=f'{name}@x.test')}"
+        }
+        client.get("/api/v1/organizations", headers=headers)
+        members = client.get(
+            "/api/v1/organizations/org_race/members", headers=headers
+        ).json()
+        people[name] = (
+            headers,
+            next(
+                m["user_id"]
+                for m in members["members"]
+                if m["email"] == f"{name}@x.test"
+            ),
+        )
+
+    # Hold each transaction right after its "is another admin left?" check. Without
+    # the per-org row lock both reach this point seeing the other admin, then both
+    # commit; with it the second blocks until the first finishes (the barrier times
+    # out for the first, which proceeds).
+    from helixos.auth.store import AuthStore
+
+    both_checked = threading.Barrier(2)
+    check = AuthStore._require_other_admin
+
+    def check_then_pause(session, org_id, excluding_user_id):
+        check(session, org_id, excluding_user_id)
+        try:
+            both_checked.wait(timeout=2)
+        except threading.BrokenBarrierError:
+            pass
+
+    monkeypatch.setattr(
+        AuthStore, "_require_other_admin", staticmethod(check_then_pause)
+    )
+
+    def demote_the_other(i):
+        # Straight at the store: through the API the audit chain's unique head key
+        # would also serialise these, hiding whether the row lock itself works.
+        me, other = ("a", "b") if i == 0 else ("b", "a")
+        auth_store.set_role("org_race", people[other][1], OrgRole.SCIENTIST)
+        return 200
+
+    outcomes = _race(2, demote_the_other)
+    assert outcomes.count(200) == 1, outcomes
+    assert sum(isinstance(item, LastAdmin) for item in outcomes) == 1, outcomes
+
+    with session_scope() as session:
+        admins = session.scalar(
+            select(func.count())
+            .select_from(MembershipORM)
+            .where(
+                MembershipORM.organization_id == "org_race",
+                MembershipORM.role == "admin",
+            )
+        )
+    assert admins == 1
