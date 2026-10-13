@@ -71,6 +71,71 @@ jobs:
         working-directory: services/api
         run: python -m pytest tests/ -v
 
+  api-image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build image
+        run: docker build -f services/api/Dockerfile -t helixos-api .
+      - name: Boots in staging posture; live and ready
+        run: |
+          docker run -d --name api -p 8000:8000 \
+            -e HELIX_ENV=staging \
+            -e HELIX_DATABASE_URL=sqlite:////tmp/helix.db \
+            -e ALLOWED_ORIGINS=https://app.example.com \
+            helixos-api
+          for _ in $(seq 1 30); do
+            curl -sf http://127.0.0.1:8000/ready && break
+            sleep 1
+          done
+          curl -sf http://127.0.0.1:8000/health || { docker logs api; exit 1; }
+          curl -sf http://127.0.0.1:8000/ready || { docker logs api; exit 1; }
+      - name: Production refuses to start without safe config
+        run: |
+          if docker run --rm helixos-api python -c "import helixos.main"; then
+            echo "production started with no configuration"
+            exit 1
+          fi
+      - name: Operator CLI runs from the image
+        run: |
+          docker run --rm -e HELIX_DATABASE_URL=sqlite:////tmp/cli.db helixos-api \
+            python -m helixos.auth.admin create-org --id org_ci --name "CI" --admin-email ci@example.com
+
+  web-image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build image
+        run: docker build -f apps/web/Dockerfile -t helixos-web --build-arg HELIX_API_PROXY_TARGET=http://api:8000 .
+      - name: Serves the app and has no demo token baked in
+        run: |
+          docker run -d --name web -p 8080:8080 helixos-web
+          for _ in $(seq 1 30); do
+            curl -sf http://127.0.0.1:8080/ -o /dev/null && break
+            sleep 1
+          done
+          curl -sf http://127.0.0.1:8080/ -o /dev/null || { docker logs web; exit 1; }
+          if docker exec web sh -c 'grep -rl org-demo-token /app/apps/web/.next'; then
+            echo "demo token found in the production bundle"
+            exit 1
+          fi
+
+  terraform:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: deploy/terraform
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.9.8"
+      - name: Format, init (no backend) and validate
+        run: |
+          terraform fmt -check -recursive
+          terraform init -backend=false -input=false
+          terraform validate
+
   connector:
     runs-on: ubuntu-latest
     steps:

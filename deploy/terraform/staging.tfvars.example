@@ -1,0 +1,16 @@
+# Copy to staging.tfvars (git-ignored) and fill in real values:
+#   terraform apply -var-file=staging.tfvars
+project_id        = "helixos-staging"
+environment       = "staging"
+github_repository = "musicofthings/helixos"
+
+oidc_issuer   = "https://YOUR-TENANT.example-idp.com/"
+oidc_audience = "helixos-api"
+
+# Until a real identity provider is wired up, staging can also accept demo tokens.
+enable_demo_tokens = false
+ai_provider        = "stub"
+
+# Set after the first apply and the first image push (see docs/DEPLOYMENT.md):
+# api_image = "asia-south1-docker.pkg.dev/helixos-staging/helixos-staging/api:<tag>"
+# web_image = "asia-south1-docker.pkg.dev/helixos-staging/helixos-staging/web:<tag>"

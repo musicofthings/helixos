@@ -1,0 +1,203 @@
+name: Deploy
+
+# Staging deploys automatically after CI passes on main. Production is manual
+# (Run workflow -> environment: production) and waits for the approvers
+# configured on the GitHub "production" environment. Rollback is the same
+# workflow with `rollback_to` set.
+#
+# Per environment, set these GitHub environment *variables* (Terraform prints
+# them: `terraform output github_variables`): GCP_PROJECT_ID, GCP_REGION,
+# GCP_WIF_PROVIDER, GCP_DEPLOYER_SA, IMAGE_REPOSITORY, API_SERVICE, WEB_SERVICE,
+# HELIX_API_URL, plus the public web settings OIDC_AUTHORITY, OIDC_CLIENT_ID,
+# OIDC_AUDIENCE (and optionally OIDC_SCOPE, OIDC_TOKEN_TYPE) and WEB_URL.
+# No secrets are used: GCP access is federated and short-lived.
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Target environment
+        type: choice
+        options: [staging, production]
+        default: staging
+      ref:
+        description: Commit SHA or tag to deploy (default is the tip of main)
+        type: string
+        default: ""
+      images_only:
+        description: First release only - build and push images, deploy nothing (the services do not exist until Terraform is applied with these images)
+        type: boolean
+        default: false
+      rollback_to:
+        description: Roll back instead of deploying - the revision suffix to restore (shown in a previous deploy's summary)
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+  id-token: write
+  actions: read
+
+concurrency:
+  group: deploy-${{ inputs.environment || 'staging' }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment || 'staging' }}
+    env:
+      TARGET: ${{ inputs.environment || 'staging' }}
+      REGION: ${{ vars.GCP_REGION }}
+      IMAGE_REPOSITORY: ${{ vars.IMAGE_REPOSITORY }}
+      API_SERVICE: ${{ vars.API_SERVICE }}
+      WEB_SERVICE: ${{ vars.WEB_SERVICE }}
+    steps:
+      - name: Resolve the commit to deploy
+        id: rev
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT: ${{ github.event_name }}
+          RUN_SHA: ${{ github.event.workflow_run.head_sha }}
+          REQUESTED: ${{ inputs.ref }}
+        run: |
+          if [ "$EVENT" = "workflow_run" ]; then
+            sha="$RUN_SHA"
+          elif [ -n "$REQUESTED" ]; then
+            sha="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${REQUESTED}" --jq .sha)"
+          else
+            sha="$(gh api "repos/${GITHUB_REPOSITORY}/commits/main" --jq .sha)"
+          fi
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "short=${sha:0:7}" >> "$GITHUB_OUTPUT"
+
+      - name: Require a green CI run for this exact commit
+        if: github.event_name == 'workflow_dispatch' && inputs.rollback_to == ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ steps.rev.outputs.sha }}
+        run: |
+          ok="$(gh run list --workflow ci.yml --commit "$SHA" --status success --json databaseId --jq length)"
+          if [ "$ok" -lt 1 ]; then
+            echo "::error::No successful CI run for $SHA; refusing to deploy untested code."
+            exit 1
+          fi
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.rev.outputs.sha }}
+
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOYER_SA }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      # ----------------------------------------------------------------- #
+      # Rollback: point 100% of traffic back at an earlier revision.
+      # ----------------------------------------------------------------- #
+      - name: Roll back
+        if: inputs.rollback_to != ''
+        env:
+          SUFFIX: ${{ inputs.rollback_to }}
+        run: |
+          gcloud run services update-traffic "$API_SERVICE" --region "$REGION" \
+            --to-revisions "${API_SERVICE}-${SUFFIX}=100"
+          gcloud run services update-traffic "$WEB_SERVICE" --region "$REGION" \
+            --to-revisions "${WEB_SERVICE}-${SUFFIX}=100"
+          bash deploy/smoke.sh "${{ vars.HELIX_API_URL }}" "${{ vars.WEB_URL }}"
+          echo "Rolled back $TARGET to revision suffix \`$SUFFIX\`" >> "$GITHUB_STEP_SUMMARY"
+
+      # ----------------------------------------------------------------- #
+      # Release
+      # ----------------------------------------------------------------- #
+      - name: Build and push images
+        if: inputs.rollback_to == ''
+        env:
+          TAG: ${{ steps.rev.outputs.short }}
+        run: |
+          gcloud auth configure-docker "${REGION}-docker.pkg.dev" --quiet
+          docker build -f services/api/Dockerfile -t "${IMAGE_REPOSITORY}/api:${TAG}" .
+          docker build -f apps/web/Dockerfile -t "${IMAGE_REPOSITORY}/web:${TAG}" \
+            --build-arg "HELIX_API_PROXY_TARGET=${{ vars.HELIX_API_URL }}" \
+            --build-arg "NEXT_PUBLIC_OIDC_AUTHORITY=${{ vars.OIDC_AUTHORITY }}" \
+            --build-arg "NEXT_PUBLIC_OIDC_CLIENT_ID=${{ vars.OIDC_CLIENT_ID }}" \
+            --build-arg "NEXT_PUBLIC_OIDC_AUDIENCE=${{ vars.OIDC_AUDIENCE }}" \
+            --build-arg "NEXT_PUBLIC_OIDC_SCOPE=${{ vars.OIDC_SCOPE }}" \
+            --build-arg "NEXT_PUBLIC_OIDC_TOKEN_TYPE=${{ vars.OIDC_TOKEN_TYPE }}" \
+            .
+          docker push "${IMAGE_REPOSITORY}/api:${TAG}"
+          docker push "${IMAGE_REPOSITORY}/web:${TAG}"
+
+      - name: Require the Cloud Run services to exist
+        if: inputs.rollback_to == '' && inputs.images_only != true
+        run: |
+          for service in "$API_SERVICE" "$WEB_SERVICE"; do
+            gcloud run services describe "$service" --region "$REGION" --format 'value(name)' >/dev/null \
+              || { echo "::error::Service $service not found. Create it first: set api_image/web_image in Terraform and apply (docs/DEPLOYMENT.md, one-time setup, step 5)."; exit 1; }
+          done
+
+      # The new revision starts with zero traffic. Starting it runs migrations
+      # (under a database lock) and waits for /ready, so a broken release never
+      # serves a request. Migrations must stay backward compatible: the previous
+      # revision keeps serving against the new schema until promotion.
+      - name: Deploy API revision (no traffic) and verify it
+        if: inputs.rollback_to == '' && inputs.images_only != true
+        env:
+          TAG: ${{ steps.rev.outputs.short }}
+          SUFFIX: ${{ steps.rev.outputs.short }}-${{ github.run_number }}
+        run: |
+          # Remember what is serving now, so the summary can say how to go back.
+          current="$(gcloud run services describe "$API_SERVICE" --region "$REGION" --format json \
+            | jq -r '[.status.traffic[] | select((.percent // 0) == 100) | .revisionName][0] // ""')"
+          echo "PREVIOUS_SUFFIX=${current#"${API_SERVICE}"-}" >> "$GITHUB_ENV"
+          gcloud run deploy "$API_SERVICE" --region "$REGION" \
+            --image "${IMAGE_REPOSITORY}/api:${TAG}" \
+            --revision-suffix "$SUFFIX" --no-traffic --tag candidate
+          url="$(gcloud run services describe "$API_SERVICE" --region "$REGION" --format json \
+            | jq -r '.status.traffic[] | select(.tag=="candidate") | .url')"
+          bash deploy/smoke.sh "$url"
+
+      - name: Promote API
+        if: inputs.rollback_to == '' && inputs.images_only != true
+        env:
+          SUFFIX: ${{ steps.rev.outputs.short }}-${{ github.run_number }}
+        run: |
+          gcloud run services update-traffic "$API_SERVICE" --region "$REGION" \
+            --to-revisions "${API_SERVICE}-${SUFFIX}=100" --remove-tags candidate
+
+      - name: Deploy web revision (no traffic) and verify it
+        if: inputs.rollback_to == '' && inputs.images_only != true
+        env:
+          TAG: ${{ steps.rev.outputs.short }}
+          SUFFIX: ${{ steps.rev.outputs.short }}-${{ github.run_number }}
+        run: |
+          gcloud run deploy "$WEB_SERVICE" --region "$REGION" \
+            --image "${IMAGE_REPOSITORY}/web:${TAG}" \
+            --revision-suffix "$SUFFIX" --no-traffic --tag candidate
+          url="$(gcloud run services describe "$WEB_SERVICE" --region "$REGION" --format json \
+            | jq -r '.status.traffic[] | select(.tag=="candidate") | .url')"
+          curl -fsS --retry 10 --retry-delay 3 --retry-all-errors -o /dev/null "$url/"
+
+      - name: Promote web and run the public smoke test
+        if: inputs.rollback_to == '' && inputs.images_only != true
+        env:
+          SUFFIX: ${{ steps.rev.outputs.short }}-${{ github.run_number }}
+        run: |
+          gcloud run services update-traffic "$WEB_SERVICE" --region "$REGION" \
+            --to-revisions "${WEB_SERVICE}-${SUFFIX}=100" --remove-tags candidate
+          bash deploy/smoke.sh "${{ vars.HELIX_API_URL }}" "${{ vars.WEB_URL }}"
+          {
+            echo "### Deployed \`${{ steps.rev.outputs.short }}\` to $TARGET"
+            echo ""
+            echo "This release's revision suffix: \`$SUFFIX\`"
+            echo "To undo it: Run workflow, environment \`$TARGET\`, rollback_to = \`${PREVIOUS_SUFFIX:-<none recorded>}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
