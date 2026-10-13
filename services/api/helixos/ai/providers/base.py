@@ -20,10 +20,27 @@ class AgentPromptContext:
     tool_summaries: list[str] = field(default_factory=list)
 
 
+@dataclass(frozen=True)
+class Usage:
+    """Tokens the model provider billed for one run."""
+
+    input_tokens: int
+    output_tokens: int
+
+
 class AgentProvider(Protocol):
-    """Streaming agent provider."""
+    """Streaming agent provider.
+
+    A provider instance serves a single run. After ``stream_response`` finishes
+    (or is abandoned) ``usage`` holds what the provider reported, or ``None``
+    when it reports nothing and the caller must estimate.
+    """
 
     name: str
+    model: str | None
+    usage: Usage | None
 
-    async def stream_response(self, context: AgentPromptContext) -> AsyncIterator[str]:
-        """Yield text fragments for SSE token events."""
+    async def stream_response(
+        self, context: AgentPromptContext, *, max_output_tokens: int
+    ) -> AsyncIterator[str]:
+        """Yield text fragments for SSE token events, generating at most ``max_output_tokens``."""

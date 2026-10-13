@@ -153,3 +153,27 @@ def test_auth_tables_are_added_to_a_database_migrated_before_they_existed(
         "auth_memberships",
         "auth_member_invites",
     } <= names
+
+
+def test_ai_usage_ledger_is_added_to_a_database_migrated_before_it_existed(
+    tmp_path,
+) -> None:
+    engine = create_engine(f"sqlite:///{tmp_path / 'old.db'}", future=True)
+    upgrade(engine)
+    with engine.begin() as connection:
+        connection.execute(text("DROP TABLE ai_usage"))
+        connection.execute(
+            text("DELETE FROM helix_schema_migrations WHERE version = '0004_ai_usage'")
+        )
+
+    assert upgrade(engine) == ["0004_ai_usage"]
+    columns = {c["name"] for c in inspect(engine).get_columns("ai_usage")}
+    assert {
+        "organization_id",
+        "user_id",
+        "cost_micros",
+        "estimated",
+        "created_at",
+    } <= columns
+    indexed = {i["name"] for i in inspect(engine).get_indexes("ai_usage")}
+    assert {"ix_ai_usage_org_created", "ix_ai_usage_user_created"} <= indexed

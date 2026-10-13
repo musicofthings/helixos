@@ -9,6 +9,7 @@ from sqlalchemy import text
 from starlette.exceptions import HTTPException
 
 from helixos import config
+from helixos.ai.budget import budget_service, build_usage_store
 from helixos.ai.router import router as ai_router
 from helixos.ai.settings import AISettings
 from helixos.audit.router import router as audit_router
@@ -88,6 +89,7 @@ def create_app() -> FastAPI:
 
     audit_service.use_store(build_audit_store(db_settings))
     eln_service.use_store(build_eln_store(db_settings))
+    budget_service.use_store(build_usage_store(db_settings))
 
     docs = config.docs_enabled()
     app = FastAPI(

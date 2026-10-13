@@ -41,3 +41,23 @@ class AgentStreamEvent(BaseModel):
 
     event: str
     data: dict[str, object]
+
+
+class UsageLine(BaseModel):
+    """Spend in one window against its cap. Amounts are US dollars as decimal strings."""
+
+    spent_usd: str
+    cap_usd: str | None
+    remaining_usd: str | None
+    resets_at: str
+
+
+class AiUsageSummary(BaseModel):
+    """Current AI spend for an organization (admin view)."""
+
+    organization_id: str
+    currency: str
+    organization_day: UsageLine
+    organization_month: UsageLine
+    you_day: UsageLine
+    max_output_tokens_per_run: int

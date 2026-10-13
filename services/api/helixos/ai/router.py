@@ -5,10 +5,19 @@ from collections.abc import AsyncIterator
 from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
 
-from helixos.ai.schemas import AgentRunCreate, AgentSession, AgentSessionCreate
+from starlette.concurrency import run_in_threadpool
+
+from helixos.ai.budget import budget_service
+from helixos.ai.schemas import (
+    AgentRunCreate,
+    AgentSession,
+    AgentSessionCreate,
+    AiUsageSummary,
+)
 from helixos.ai.service import agent_service
+from helixos.auth.roles import MEMBERS_MANAGE
 from helixos.auth.schemas import Actor
-from helixos.auth.service import get_current_actor
+from helixos.auth.service import get_current_actor, organization_service
 
 router = APIRouter(prefix="/ai", tags=["ai"])
 
@@ -32,14 +41,18 @@ async def start_run(
     payload: AgentRunCreate, actor: Actor = Depends(get_current_actor)
 ) -> StreamingResponse:
     """Start an agent run and stream SSE events."""
-    # Validate before headers are sent so 404/403 use the normal error envelope.
-    agent_service.authorize_session(payload.session_id, actor)
+    # Refuse before headers are sent so 404/403/422/429 use the normal error
+    # envelope. Reads the spend ledger, so it runs off the event loop.
+    ticket = await run_in_threadpool(
+        agent_service.preflight, payload.session_id, payload.message, actor
+    )
 
     async def event_stream() -> AsyncIterator[str]:
         async for frame in agent_service.stream_run(
             payload.session_id,
             payload.message,
             actor,
+            ticket=ticket,
             experiment_id=payload.context.experiment_id,
             experiment_title=payload.context.experiment_title,
             sequence_length=payload.context.sequence_length,
@@ -57,3 +70,12 @@ async def start_run(
             "X-Accel-Buffering": "no",
         },
     )
+
+
+@router.get("/usage", response_model=AiUsageSummary)
+def get_usage(
+    organization_id: str, actor: Actor = Depends(get_current_actor)
+) -> AiUsageSummary:
+    """AI spend against the caps for an organization (admins only)."""
+    organization_service.require_permission(actor, organization_id, MEMBERS_MANAGE)
+    return AiUsageSummary(**budget_service.summary(organization_id, actor.subject))

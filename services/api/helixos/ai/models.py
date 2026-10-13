@@ -50,6 +50,14 @@ class AgentRunRecord:
     events: list[dict[str, object]] = field(default_factory=list)
     token_count: int = 0
     provider: str | None = None
+    model: str | None = None
+    # Characters streamed back, and what the provider billed (None = not reported).
+    output_chars: int = 0
+    usage: object | None = None
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cost_micros: int = 0
+    usage_estimated: bool = True
 
     @classmethod
     def create(cls, session_id: str, message: str) -> "AgentRunRecord":

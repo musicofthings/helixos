@@ -1,6 +1,6 @@
 """Agent provider registry."""
 
-from helixos.ai.providers.base import AgentPromptContext, AgentProvider
+from helixos.ai.providers.base import AgentPromptContext, AgentProvider, Usage
 from helixos.ai.providers.openai_compatible import OpenAICompatibleProvider
 from helixos.ai.providers.stub import StubAgentProvider
 from helixos.ai.providers.vertex import VertexAIProvider
@@ -15,6 +15,7 @@ def get_agent_provider() -> AgentProvider:
             api_key=settings.openai_api_key,
             base_url=settings.openai_base_url,
             model=settings.openai_model,
+            stream_usage=settings.openai_stream_usage,
         )
     if settings.effective_provider == "vertex" and settings.vertex_project:
         return VertexAIProvider(
@@ -30,6 +31,7 @@ __all__ = [
     "AgentProvider",
     "OpenAICompatibleProvider",
     "StubAgentProvider",
+    "Usage",
     "VertexAIProvider",
     "get_agent_provider",
 ]

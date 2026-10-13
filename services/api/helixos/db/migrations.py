@@ -76,6 +76,7 @@ def _baseline(connection: Connection, op: Operations) -> None:
     """Create missing tables, then add nullable columns declared since a database
     was first created (the behaviour databases relied on before versioning)."""
     # Importing registers every ORM model on Base.metadata.
+    from helixos.ai import orm as ai_orm  # noqa: F401
     from helixos.audit.orm import AuditEventORM  # noqa: F401
     from helixos.auth import orm as auth_orm  # noqa: F401
     from helixos.eln import orm as eln_orm  # noqa: F401
@@ -161,10 +162,19 @@ def _auth_tables(connection: Connection, op: Operations) -> None:
     Base.metadata.create_all(connection, tables=tables, checkfirst=True)
 
 
+def _ai_usage(connection: Connection, op: Operations) -> None:
+    """The AI spend ledger. Fresh databases already have it (baseline builds from
+    the models); ``checkfirst`` makes this a no-op there."""
+    from helixos.ai import orm as ai_orm
+
+    Base.metadata.create_all(connection, tables=[ai_orm.AiUsageORM.__table__], checkfirst=True)
+
+
 MIGRATIONS: list[tuple[str, MigrationFn]] = [
     ("0001_baseline", _baseline),
     ("0002_eln_list_indexes", _list_indexes),
     ("0003_auth_tables", _auth_tables),
+    ("0004_ai_usage", _ai_usage),
 ]
 
 

@@ -203,6 +203,17 @@ def test_invite_token_guessing_is_slowed(limited, monkeypatch) -> None:
     assert codes == [404, 404, 429, 429]
 
 
+def test_agent_session_creation_is_limited(limited, monkeypatch) -> None:
+    monkeypatch.setenv("HELIX_RATE_LIMIT_AI_SESSION_PER_MINUTE", "2")
+    codes = [
+        limited.post(
+            "/api/v1/ai/sessions", headers=DEMO, json={"organization_id": "org_demo"}
+        ).status_code
+        for _ in range(3)
+    ]
+    assert codes == [201, 201, 429]
+
+
 def test_connector_jobs_are_limited(limited, monkeypatch) -> None:
     monkeypatch.setenv("HELIX_RATE_LIMIT_MCP_JOB_PER_MINUTE", "2")
     job = {

@@ -502,15 +502,18 @@ def agent_eval(r: Runner, server: Server | None) -> None:
     r.check("authz: cross-tenant/missing/anonymous rejected before streaming", authz)
 
     def odd_input():
-        for label, message in [("unicode", "இந்த ஆய்வு சுருக்கமா? 🧬 ¿Qué pasa?"), ("long", "x " * 5000), ("markup", "<script>alert(1)</script> ```sql DROP TABLE; ```")]:
+        for label, message in [("unicode", "இந்த ஆய்வு சுருக்கமா? 🧬 ¿Qué pasa?"), ("long (7.8k chars, under the input limit)", "x " * 3900), ("markup", "<script>alert(1)</script> ```sql DROP TABLE; ```")]:
             resp, frames, _ = run_agent(r, DEMO, session, message)
             expect(resp.status_code == 200 and frames and frames[-1][0] == "done", f"{label}: {resp.status_code}")
+        too_long = r.req("POST", "/api/v1/ai/runs", DEMO, json={"session_id": session, "message": "x " * 5000, "context": {}})
+        expect(too_long.status_code == 422 and too_long.json()["error"]["code"] == "message_too_long", f"10k chars: {too_long.status_code} {too_long.text[:120]}")
+        expect(too_long.headers["content-type"].startswith("application/json"), "oversized message must fail before streaming starts")
         empty = r.req("POST", "/api/v1/ai/runs", DEMO, json={"session_id": session, "message": "", "context": {}})
         expect(empty.status_code in (200, 422), f"empty message {empty.status_code}")
         bad = r.req("POST", "/api/v1/ai/runs", DEMO, json={"session_id": session})
         expect(bad.status_code == 422, f"missing field {bad.status_code}")
 
-    r.check("odd input: unicode, 10k chars, markup complete; malformed body is 422", odd_input)
+    r.check("odd input: unicode, near-limit text, markup complete; oversized and malformed bodies are 422", odd_input)
 
     def concurrency():
         sessions = [new_session(r, DEMO, "org_demo") for _ in range(10)]

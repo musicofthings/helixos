@@ -12,6 +12,7 @@ class AISettings:
     openai_api_key: str | None
     openai_base_url: str
     openai_model: str
+    openai_stream_usage: bool
     vertex_project: str | None
     vertex_location: str
     vertex_model: str
@@ -23,6 +24,9 @@ class AISettings:
             openai_api_key=os.getenv("HELIX_OPENAI_API_KEY"),
             openai_base_url=os.getenv("HELIX_OPENAI_BASE_URL", "https://api.openai.com/v1").rstrip("/"),
             openai_model=os.getenv("HELIX_OPENAI_MODEL", "gpt-4o-mini"),
+            # Some OpenAI-compatible servers reject stream_options; "0" falls back
+            # to estimated usage for spend accounting.
+            openai_stream_usage=os.getenv("HELIX_OPENAI_STREAM_USAGE", "1") != "0",
             vertex_project=os.getenv("GOOGLE_CLOUD_PROJECT") or os.getenv("HELIX_VERTEX_PROJECT"),
             vertex_location=os.getenv("GOOGLE_CLOUD_LOCATION", "us-west1"),
             vertex_model=os.getenv("HELIX_VERTEX_MODEL", "gemini-2.0-flash-001"),
