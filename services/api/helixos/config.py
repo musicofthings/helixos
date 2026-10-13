@@ -232,7 +232,31 @@ def validate_runtime_config(database: DatabaseSettings, ai: AISettings) -> None:
             "HELIX_OIDC_ISSUER needs HELIX_DATABASE_URL: users and memberships are stored there"
         )
 
+    from helixos import limits  # imported here: limits depends on this module
+
+    rate_settings, rate_problems = limits.rate_limit_settings_and_problems()
+    ai_limits, ai_limit_problems = limits.ai_limit_settings_and_problems()
+    problems.extend(rate_problems)
+    problems.extend(ai_limit_problems)
+
     if env != DEVELOPMENT:
+        if not rate_settings.enabled:
+            problems.append(
+                "HELIX_RATE_LIMIT_ENABLED=0 is not allowed when hosted: "
+                "rate limiting must stay on"
+            )
+        if ai.effective_provider != "stub":
+            # A paid provider without prices or caps has no spend ceiling at all.
+            if not ai_limits.priced:
+                problems.append(
+                    "HELIX_AI_PRICE_INPUT_USD_PER_MTOK and HELIX_AI_PRICE_OUTPUT_USD_PER_MTOK "
+                    "are required with a paid AI provider (spend caps need prices)"
+                )
+            if not ai_limits.has_hard_caps:
+                problems.append(
+                    "HELIX_AI_BUDGET_GLOBAL_MONTHLY_USD and HELIX_AI_BUDGET_ORG_DAILY_USD "
+                    "are required with a paid AI provider"
+                )
         if not origins and not origin_problems:
             problems.append("ALLOWED_ORIGINS is required (comma-separated web origins)")
         if os.getenv("HELIX_ALLOW_UNVERIFIED_JWT") == "1":

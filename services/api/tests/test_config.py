@@ -30,6 +30,16 @@ def clean_env(monkeypatch):
         "HELIX_OIDC_JWKS_URL",
         "HELIX_OIDC_ALGORITHMS",
         "HELIX_OIDC_LEEWAY_SECONDS",
+        "HELIX_RATE_LIMIT_ENABLED",
+        "HELIX_RATE_LIMIT_ACTOR_PER_MINUTE",
+        "HELIX_TRUSTED_PROXY_HOPS",
+        "HELIX_MAX_BODY_BYTES",
+        "HELIX_AI_PRICE_INPUT_USD_PER_MTOK",
+        "HELIX_AI_PRICE_OUTPUT_USD_PER_MTOK",
+        "HELIX_AI_BUDGET_GLOBAL_MONTHLY_USD",
+        "HELIX_AI_BUDGET_ORG_DAILY_USD",
+        "HELIX_AI_BUDGET_USER_DAILY_USD",
+        "HELIX_AI_MAX_OUTPUT_TOKENS",
     ):
         monkeypatch.delenv(name, raising=False)
 
@@ -41,6 +51,10 @@ def _production_env(monkeypatch) -> None:
     monkeypatch.setenv("HELIX_OPENAI_API_KEY", "sk-test")
     monkeypatch.setenv("HELIX_OIDC_ISSUER", "https://idp.example.com/")
     monkeypatch.setenv("HELIX_OIDC_AUDIENCE", "helixos-api")
+    monkeypatch.setenv("HELIX_AI_PRICE_INPUT_USD_PER_MTOK", "0.15")
+    monkeypatch.setenv("HELIX_AI_PRICE_OUTPUT_USD_PER_MTOK", "0.60")
+    monkeypatch.setenv("HELIX_AI_BUDGET_GLOBAL_MONTHLY_USD", "200")
+    monkeypatch.setenv("HELIX_AI_BUDGET_ORG_DAILY_USD", "20")
 
 
 def _validate(database: DatabaseSettings = POSTGRES) -> None:
@@ -296,3 +310,77 @@ def test_not_ready_when_the_database_is_unreachable(sqlite_client, monkeypatch) 
     monkeypatch.setattr("helixos.main.get_engine", broken)
     assert sqlite_client.get("/ready").status_code == 503
     assert sqlite_client.get("/health").status_code == 200
+
+
+# --------------------------------------------------------------------------- #
+# Rate limits and AI spend caps
+# --------------------------------------------------------------------------- #
+def test_a_paid_ai_provider_must_come_with_prices_and_caps(monkeypatch) -> None:
+    _production_env(monkeypatch)
+    monkeypatch.delenv("HELIX_AI_PRICE_OUTPUT_USD_PER_MTOK")
+    assert "spend caps need prices" in _problems()
+
+    _production_env(monkeypatch)
+    monkeypatch.delenv("HELIX_AI_BUDGET_ORG_DAILY_USD")
+    assert "HELIX_AI_BUDGET_ORG_DAILY_USD are required" in _problems()
+
+    _production_env(monkeypatch)
+    monkeypatch.delenv("HELIX_AI_BUDGET_GLOBAL_MONTHLY_USD")
+    assert "HELIX_AI_BUDGET_GLOBAL_MONTHLY_USD" in _problems()
+
+
+def test_the_free_stub_needs_no_spend_settings(monkeypatch) -> None:
+    monkeypatch.setenv("HELIX_ENV", "staging")
+    monkeypatch.setenv("ALLOWED_ORIGINS", WEB)
+    _validate(DatabaseSettings(url="sqlite:///x.db"))
+
+
+def test_rate_limiting_defaults_on_when_hosted_and_cannot_be_disabled_there(
+    monkeypatch,
+) -> None:
+    from helixos import limits
+
+    assert not limits.rate_limit_settings().enabled  # development
+    monkeypatch.setenv("HELIX_ENV", "staging")
+    assert limits.rate_limit_settings().enabled
+
+    monkeypatch.setenv("ALLOWED_ORIGINS", WEB)
+    monkeypatch.setenv("HELIX_RATE_LIMIT_ENABLED", "0")
+    assert "rate limiting must stay on" in _problems(
+        DatabaseSettings(url="sqlite:///x.db")
+    )
+
+    monkeypatch.setenv("HELIX_ENV", "development")
+    _validate(DatabaseSettings(url=None))  # fine locally
+
+
+@pytest.mark.parametrize(
+    ("name", "value", "expected"),
+    [
+        ("HELIX_RATE_LIMIT_ACTOR_PER_MINUTE", "0", "between 1 and"),
+        ("HELIX_RATE_LIMIT_ACTOR_PER_MINUTE", "lots", "must be an integer"),
+        ("HELIX_TRUSTED_PROXY_HOPS", "9", "between 0 and 5"),
+        ("HELIX_MAX_BODY_BYTES", "10", "between 1024 and"),
+        ("HELIX_AI_BUDGET_ORG_DAILY_USD", "-5", "zero or more"),
+        ("HELIX_AI_BUDGET_USER_DAILY_USD", "ten", "number of US dollars"),
+        ("HELIX_AI_MAX_OUTPUT_TOKENS", "1", "between 16 and"),
+    ],
+)
+def test_limit_settings_are_validated(monkeypatch, name, value, expected) -> None:
+    monkeypatch.setenv(name, value)
+    assert expected in _problems(DatabaseSettings(url=None))
+
+
+def test_ai_limit_defaults_are_conservative(monkeypatch) -> None:
+    from helixos import limits
+
+    settings = limits.ai_limit_settings()
+    assert (
+        settings.max_output_tokens,
+        settings.max_input_chars,
+        settings.run_timeout_seconds,
+    ) == (1024, 8000, 120)
+    assert settings.max_concurrent_runs_per_user == 0  # development: unlimited
+    monkeypatch.setenv("HELIX_ENV", "staging")
+    assert limits.ai_limit_settings().max_concurrent_runs_per_user == 2
+    assert not settings.priced and not settings.has_hard_caps
